@@ -20,6 +20,39 @@ def test_load_yml_preserving_missing_file_returns_none():
     assert load_yml_preserving("/nonexistent/path/file.yml") is None
 
 
+def test_load_yml_preserving_empty_file():
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+        path = f.name
+    try:
+        # Empty file should return None or empty dict
+        data = load_yml_preserving(path)
+        assert data is None or data == {}
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_load_yml_preserving_whitespace_only_file():
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+        f.write("   \n\n  \n")
+        path = f.name
+    try:
+        data = load_yml_preserving(path)
+        assert data is None or data == {}
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_load_yml_preserving_comments_only_file():
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
+        f.write("# Only a comment here\n# Another line\n")
+        path = f.name
+    try:
+        data = load_yml_preserving(path)
+        assert data is None or isinstance(data, dict)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
 def test_load_yml_preserving_returns_dict():
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
         f.write("# comment\nkey: value\n")
@@ -59,7 +92,7 @@ def test_update_yml_preserving_merges_and_preserves_comment():
         assert data is not None
         assert data.get("main_llm") == "local_models/new_model"
         raw = Path(path).read_text(encoding="utf-8")
-        assert "Portal test comment line" in raw or "comment" in raw
+        assert "Portal test comment line" in raw, "Comment should be preserved after update"
     finally:
         Path(path).unlink(missing_ok=True)
 

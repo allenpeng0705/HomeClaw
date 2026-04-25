@@ -1,3 +1,5 @@
+"""Runtime tests for VMPrint render functions (imported directly from tools.builtin)."""
+
 from __future__ import annotations
 
 import html
@@ -10,46 +12,17 @@ import types
 from pathlib import Path
 from typing import Optional, Tuple
 
+import pytest
+
+from tools.builtin import _rewrite_vmprint_preview_asset_links, _vmprint_render_sync
 from tools.vmprint_preview_loader import vmprint_hybrid_preview_loaders
+
 
 class _Proc:
     def __init__(self, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""):
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
-
-
-def _load_vmprint_render_sync():
-    root = Path(__file__).resolve().parents[1]
-    src = (root / "tools" / "builtin.py").read_text(encoding="utf-8")
-    start_helper = src.index("def _vmprint_layout_root_candidate(")
-    end_helper = src.index("\ndef _ensure_vmprint_static_assets", start_helper)
-    helper_src = src[start_helper:end_helper].strip() + "\n\n"
-    start_limits = src.index("def _vmprint_inline_limits(")
-    start_render = src.index("def _vmprint_render_sync(")
-    end_render = src.index("\n\nasync def _vmprint_render_executor", start_render)
-    fn_src = helper_src + src[start_limits:start_render] + "\n" + src[start_render:end_render]
-
-    class _DummyLogger:
-        def debug(self, *args, **kwargs):  # noqa: ANN002, ANN003
-            return None
-
-    ns = {
-        "Path": Path,
-        "tempfile": tempfile,
-        "subprocess": subprocess,
-        "html": html,
-        "json": json,
-        "os": os,
-        "Optional": Optional,
-        "Tuple": Tuple,
-        "logger": _DummyLogger(),
-        "_get_tools_config": lambda: {},
-        "_vmprint_preview_client_engine_enabled": lambda: False,
-        "vmprint_hybrid_preview_loaders": vmprint_hybrid_preview_loaders,
-    }
-    exec(fn_src, ns)
-    return ns["_vmprint_render_sync"], ns
 
 
 def _make_fake_vmprint_tree(tmp_path: Path, with_vm_cli: bool = True) -> Path:
@@ -71,23 +44,7 @@ def _make_fake_vmprint_tree(tmp_path: Path, with_vm_cli: bool = True) -> Path:
     return vmp
 
 
-def _load_vmprint_preview_rewrite():
-    root = Path(__file__).resolve().parents[1]
-    src = (root / "tools" / "builtin.py").read_text(encoding="utf-8")
-    start = src.index("def _rewrite_vmprint_preview_asset_links(")
-    end = src.index("\n\ndef _vmprint_render_sync(", start)
-    fn_src = src[start:end]
-
-    ns = {
-        "FILE_OUTPUT_SUBDIR": "output",
-        "_VMPRINT_ASSET_VERSION": "v1",
-    }
-    exec(fn_src, ns)
-    return ns["_rewrite_vmprint_preview_asset_links"]
-
-
 def test_vmprint_preview_asset_links_rewrite_signed_urls(monkeypatch):
-    fn = _load_vmprint_preview_rewrite()
     html_in = (
         "<link rel='stylesheet' href='./styles.css'>"
         "<script src='./_vmprint_assets/v1/vmprint-fontkit.js'></script>"
@@ -109,7 +66,7 @@ def test_vmprint_preview_asset_links_rewrite_signed_urls(monkeypatch):
     monkeypatch.setitem(sys.modules, "core", core_mod)
     monkeypatch.setitem(sys.modules, "core.result_viewer", rv_mod)
 
-    html_out = fn(html_in, "companion")
+    html_out = _rewrite_vmprint_preview_asset_links(html_in, "companion")
     assert "token=signed123" in html_out
     assert "./_vmprint_assets/v1/" not in html_out
     assert "./styles.css" not in html_out
@@ -124,7 +81,6 @@ def test_vmprint_preview_asset_links_rewrite_signed_urls(monkeypatch):
 
 
 def test_vmprint_preview_asset_links_rewrite_dev_unsigned_urls(monkeypatch):
-    fn = _load_vmprint_preview_rewrite()
     html_in = (
         "<link rel='stylesheet' href='./styles.css'>"
         "<script src='./_vmprint_assets/v1/vmprint-fontkit.js'></script>"
@@ -146,7 +102,7 @@ def test_vmprint_preview_asset_links_rewrite_dev_unsigned_urls(monkeypatch):
     monkeypatch.setitem(sys.modules, "core", core_mod)
     monkeypatch.setitem(sys.modules, "core.result_viewer", rv_mod)
 
-    html_out = fn(html_in, "companion")
+    html_out = _rewrite_vmprint_preview_asset_links(html_in, "companion")
     assert "dev_unsigned=1" in html_out
     assert "./_vmprint_assets/v1/" not in html_out
     assert "./styles.css" not in html_out
@@ -158,9 +114,8 @@ def test_vmprint_preview_asset_links_rewrite_dev_unsigned_urls(monkeypatch):
 
 
 def test_vmprint_render_sync_rejects_unknown_output_format(tmp_path: Path):
-    fn, _ = _load_vmprint_render_sync()
     vmp = _make_fake_vmprint_tree(tmp_path)
-    pdf, txt, err, side = fn(
+    pdf, txt, err, side = _vmprint_render_sync(
         "hello",
         output_format="unknown",
         vmprint_dir=str(vmp),
@@ -174,7 +129,6 @@ def test_vmprint_render_sync_rejects_unknown_output_format(tmp_path: Path):
 
 
 def test_vmprint_render_sync_layout_json_success(tmp_path: Path, monkeypatch):
-    fn, ns = _load_vmprint_render_sync()
     vmp = _make_fake_vmprint_tree(tmp_path, with_vm_cli=True)
 
     def _fake_run(cmd, cwd=None, capture_output=None, timeout=None, check=None):  # noqa: ANN001
@@ -191,9 +145,9 @@ def test_vmprint_render_sync_layout_json_success(tmp_path: Path, monkeypatch):
             return _Proc(0)
         return _Proc(1, stderr=b"unexpected command")
 
-    monkeypatch.setattr(ns["subprocess"], "run", _fake_run)
+    monkeypatch.setattr("tools.builtin.subprocess.run", _fake_run)
 
-    pdf, txt, err, side = fn(
+    pdf, txt, err, side = _vmprint_render_sync(
         "hello layout",
         output_format="layout_json",
         vmprint_dir=str(vmp),
@@ -208,7 +162,6 @@ def test_vmprint_render_sync_layout_json_success(tmp_path: Path, monkeypatch):
 
 
 def test_vmprint_render_sync_browser_preview_html_success(tmp_path: Path, monkeypatch):
-    fn, ns = _load_vmprint_render_sync()
     vmp = _make_fake_vmprint_tree(tmp_path, with_vm_cli=True)
 
     def _fake_run(cmd, cwd=None, capture_output=None, timeout=None, check=None):  # noqa: ANN001
@@ -226,9 +179,9 @@ def test_vmprint_render_sync_browser_preview_html_success(tmp_path: Path, monkey
             return _Proc(0, stdout=payload.encode("utf-8"))
         return _Proc(1, stderr=b"unexpected command")
 
-    monkeypatch.setattr(ns["subprocess"], "run", _fake_run)
+    monkeypatch.setattr("tools.builtin.subprocess.run", _fake_run)
 
-    pdf, txt, err, side = fn(
+    pdf, txt, err, side = _vmprint_render_sync(
         "hello html",
         output_format="browser_preview_html",
         vmprint_dir=str(vmp),
@@ -250,8 +203,6 @@ def test_vmprint_render_sync_browser_preview_html_success(tmp_path: Path, monkey
 
 
 def test_vmprint_render_sync_browser_preview_html_includes_client_engine_when_enabled(tmp_path: Path, monkeypatch):
-    fn, ns = _load_vmprint_render_sync()
-    ns["_vmprint_preview_client_engine_enabled"] = lambda: True
     vmp = _make_fake_vmprint_tree(tmp_path, with_vm_cli=True)
 
     def _fake_run(cmd, cwd=None, capture_output=None, timeout=None, check=None):  # noqa: ANN001
@@ -269,9 +220,10 @@ def test_vmprint_render_sync_browser_preview_html_includes_client_engine_when_en
             return _Proc(0, stdout=payload.encode("utf-8"))
         return _Proc(1, stderr=b"unexpected command")
 
-    monkeypatch.setattr(ns["subprocess"], "run", _fake_run)
+    monkeypatch.setattr("tools.builtin.subprocess.run", _fake_run)
+    monkeypatch.setattr("tools.builtin._vmprint_preview_client_engine_enabled", lambda: True)
 
-    pdf, txt, err, _side = fn(
+    pdf, txt, err, _side = _vmprint_render_sync(
         "hello html client",
         output_format="browser_preview_html",
         vmprint_dir=str(vmp),
@@ -285,7 +237,6 @@ def test_vmprint_render_sync_browser_preview_html_includes_client_engine_when_en
 
 
 def test_vmprint_render_sync_layout_json_requires_vmprint_cli(tmp_path: Path, monkeypatch):
-    fn, ns = _load_vmprint_render_sync()
     vmp = _make_fake_vmprint_tree(tmp_path, with_vm_cli=False)
 
     def _fake_run(cmd, cwd=None, capture_output=None, timeout=None, check=None):  # noqa: ANN001
@@ -297,9 +248,9 @@ def test_vmprint_render_sync_layout_json_requires_vmprint_cli(tmp_path: Path, mo
             return _Proc(0)
         return _Proc(1, stderr=b"unexpected command")
 
-    monkeypatch.setattr(ns["subprocess"], "run", _fake_run)
+    monkeypatch.setattr("tools.builtin.subprocess.run", _fake_run)
 
-    pdf, txt, err, side = fn(
+    pdf, txt, err, side = _vmprint_render_sync(
         "hello layout",
         output_format="layout_json",
         vmprint_dir=str(vmp),
@@ -313,7 +264,6 @@ def test_vmprint_render_sync_layout_json_requires_vmprint_cli(tmp_path: Path, mo
 
 
 def test_vmprint_render_sync_browser_preview_allows_large_layout(tmp_path: Path, monkeypatch):
-    fn, ns = _load_vmprint_render_sync()
     vmp = _make_fake_vmprint_tree(tmp_path, with_vm_cli=True)
 
     huge_layout = '{"pages":[{"width":595,"height":842,"boxes":[' + ("{}," * 1_200_000) + '{}]}]}'
@@ -333,9 +283,9 @@ def test_vmprint_render_sync_browser_preview_allows_large_layout(tmp_path: Path,
             return _Proc(0)
         return _Proc(1, stderr=b"unexpected command")
 
-    monkeypatch.setattr(ns["subprocess"], "run", _fake_run)
+    monkeypatch.setattr("tools.builtin.subprocess.run", _fake_run)
 
-    pdf, txt, err, side = fn(
+    pdf, txt, err, side = _vmprint_render_sync(
         "hello html",
         output_format="browser_preview_html",
         vmprint_dir=str(vmp),
@@ -347,3 +297,40 @@ def test_vmprint_render_sync_browser_preview_allows_large_layout(tmp_path: Path,
     assert txt is not None
     assert "<!doctype html>" in txt.lower()
     assert side is not None
+
+
+def test_vmprint_render_sync_browser_preview_rejects_oversized_payload(tmp_path: Path, monkeypatch):
+    """Layout JSON exceeding the size guard is rejected gracefully."""
+    vmp = _make_fake_vmprint_tree(tmp_path, with_vm_cli=True)
+
+    # Layout that is exactly at the limit should succeed; anything over 2 MiB fails.
+    huge_layout = '{"pages":[{"width":595,"height":842,"boxes":[' + ("{}," * 1_200_000) + '{}]}]}'
+
+    def _fake_run(cmd, cwd=None, capture_output=None, timeout=None, check=None):  # noqa: ANN001
+        if str(cmd[1]).endswith("draft2final/dist/cli.js"):
+            out_flag = "--out" if "--out" in cmd else "--output"
+            out_path = cmd[cmd.index(out_flag) + 1]
+            Path(out_path).write_text('{"documentVersion":"1.1","layout":{},"styles":{},"elements":[]}', encoding="utf-8")
+            return _Proc(0)
+        if str(cmd[1]) == "-e":
+            # Payload size well over 2 MiB should be rejected by the size guard.
+            oversized_payload = '{"svgs":[' + json.dumps("<svg>" + ("x" * 2_100_000) + "</svg>") + "]}"
+            return _Proc(0, stdout=oversized_payload.encode("utf-8"))
+        if str(cmd[1]).endswith("cli/dist/index.js"):
+            layout_path = cmd[cmd.index("--emit-layout") + 1]
+            Path(layout_path).write_text(huge_layout, encoding="utf-8")
+            return _Proc(0)
+        return _Proc(1, stderr=b"unexpected command")
+
+    monkeypatch.setattr("tools.builtin.subprocess.run", _fake_run)
+
+    pdf, txt, err, side = _vmprint_render_sync(
+        "hello html",
+        output_format="browser_preview_html",
+        vmprint_dir=str(vmp),
+        vmprint_profile="literature",
+        vmprint_style=None,
+    )
+    # The size guard should kick in and return an error or empty result.
+    assert pdf is None
+    assert "VMPrint layout emit failed" in (err or "") or side is None or "layout-data" not in (txt or "")

@@ -66,3 +66,23 @@ def test_list_workspace_files_wrong_owner(mock_cc_enabled, tmp_path):
     sid = rec["clawcode_session_id"]
     entries, err, code = clawcode_store.list_workspace_files(sid, "u2", "")
     assert entries is None and code == 403
+
+
+def test_list_workspace_files_nonexistent_subdir(mock_cc_enabled, tmp_path):
+    """Non-existent subdirectory should return empty list (not an error)."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    rec = clawcode_store.create_session(owner_user_id="u1", cwd=str(root))
+    sid = rec["clawcode_session_id"]
+    entries, err, code = clawcode_store.list_workspace_files(sid, "u1", "nonexistent_dir")
+    assert entries == [] and code == 200
+
+
+def test_list_workspace_files_empty_directory(mock_cc_enabled, tmp_path):
+    """Empty directory should return empty list (not an error)."""
+    root = tmp_path / "proj"
+    (root / "empty_dir").mkdir()
+    rec = clawcode_store.create_session(owner_user_id="u1", cwd=str(root))
+    sid = rec["clawcode_session_id"]
+    entries, err, code = clawcode_store.list_workspace_files(sid, "u1", "empty_dir")
+    assert entries == [] and code == 200

@@ -5,30 +5,6 @@ import pytest
 from base.util import Util
 
 
-@pytest.fixture
-def util_with_panda(monkeypatch):
-    # Avoid importing torch in has_gpu_cuda during Util(); sandbox may abort on torch load.
-    monkeypatch.setattr(Util, "has_gpu_cuda", lambda self: False)
-    Util._instance = None
-    u = Util()
-
-    class _Meta:
-        panda = {
-            "enabled": True,
-            "host": "10.0.1.2",
-            "port": 9090,
-            "paths": {
-                "main_llm": "/v1/chat",
-                "cloud_llm": "/v1/cloud",
-                "embedding": "/v1/embeddings",
-            },
-            "timeout_seconds": 45,
-        }
-
-    monkeypatch.setattr(u, "core_metadata", _Meta())
-    return u
-
-
 def test_panda_openai_chat_urls(util_with_panda):
     u = util_with_panda
     assert u.panda_openai_chat_url("local") == "http://10.0.1.2:9090/v1/chat"
@@ -44,16 +20,21 @@ def test_panda_embedding_and_completions_urls(util_with_panda):
 
 
 def test_panda_disabled_returns_none(monkeypatch):
+    """Test that panda disabled returns None URLs. Creates fresh Util with panda disabled."""
     monkeypatch.setattr(Util, "has_gpu_cuda", lambda self: False)
+    original = Util._instance
     Util._instance = None
-    u = Util()
+    try:
+        u = Util()
 
-    class _Meta:
-        panda = {"enabled": False}
+        class _Meta:
+            panda = {"enabled": False}
 
-    monkeypatch.setattr(u, "core_metadata", _Meta())
-    assert u.panda_openai_chat_url("litellm") is None
-    assert u.panda_openai_embedding_url() is None
+        monkeypatch.setattr(u, "core_metadata", _Meta())
+        assert u.panda_openai_chat_url("litellm") is None
+        assert u.panda_openai_embedding_url() is None
+    finally:
+        Util._instance = original
 
 
 def test_panda_http_timeout_override(util_with_panda):

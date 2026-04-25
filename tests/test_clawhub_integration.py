@@ -71,18 +71,6 @@ def test_clawhub_install_and_convert_creates_download_dir_when_missing(tmp_path,
     assert Path(install_cwd[0]).resolve() == staging.resolve()
 
 
-@pytest.fixture
-def portal_temp_config(monkeypatch, tmp_path):
-    """Point portal config and auth to tmp_path."""
-    pytest.importorskip("fastapi")
-    pytest.importorskip("starlette")
-    import portal.config as config_mod
-    import portal.auth as auth_mod
-    monkeypatch.setattr(config_mod, "get_config_dir", lambda: tmp_path)
-    monkeypatch.setattr(auth_mod, "get_config_dir", lambda: tmp_path)
-    return tmp_path
-
-
 def test_portal_skills_page_requires_login(portal_temp_config):
     pytest.importorskip("fastapi")
     pytest.importorskip("starlette")

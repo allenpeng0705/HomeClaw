@@ -4,8 +4,6 @@ import asyncio
 
 import pytest
 
-from base.tools import ToolContext
-
 
 def test_generic_allowlist_defaults_to_run_skill():
     from core.pending_user_action_dispatch import _generic_allowlist
@@ -15,19 +13,6 @@ def test_generic_allowlist_defaults_to_run_skill():
     assert _generic_allowlist({"pending_user_action_generic_tools": ["", "   ", ""]}) == {"run_skill"}
     assert _generic_allowlist({"pending_user_action_generic_tools": ["run_skill"]}) == {"run_skill"}
     assert _generic_allowlist({"pending_user_action_generic_tools": ["time", "run_skill"]}) == {"time", "run_skill"}
-
-
-@pytest.fixture
-def minimal_context():
-    return ToolContext(
-        core=None,
-        app_id="homeclaw",
-        user_name="",
-        user_id="u1",
-        friend_id="HomeClaw",
-        session_id="",
-        request=None,
-    )
 
 
 class _MockRegistry:

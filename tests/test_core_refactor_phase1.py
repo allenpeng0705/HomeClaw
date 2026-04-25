@@ -8,6 +8,8 @@ If the env aborts when loading torch (via base.util), run only tool_helpers_fall
   python -m pytest tests/test_core_refactor_phase1.py -v -k "tool_helpers_fallback or parse_raw or tool_result or infer_route or infer_remind or remind_me"
 
 These tests do NOT start Core or load chromadb; they only exercise the extracted helper modules.
+
+Note: Phase 2-4 tests are in test_core_refactor_phases2_4.py.
 """
 
 import pytest

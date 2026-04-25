@@ -43,7 +43,8 @@ def test_load_system_prompt_addendum_from_repo():
     from core.clawcode_prompt import load_system_prompt_addendum
 
     text = load_system_prompt_addendum()
-    assert "Claw-Code" in text or "coding agent" in text.lower()
+    # The addendum should contain the Claw-Code agent identifier (or be empty if not configured).
+    assert "Claw-Code" in text, "System prompt addendum should contain 'Claw-Code' when clawcode.yml is present"
 
 
 @patch("core.clawcode_prompt.load_clawcode_yaml", return_value={})

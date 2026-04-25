@@ -28,3 +28,13 @@ https://example.com/files/out?scope=u&path=output/x.preview.html&dev_unsigned=1
 def test_strip_vmprint_noop_when_absent():
     s = "User asked about weather.\n\nAssistant: It will rain."
     assert strip_vmprint_file_link_block(s) == s
+
+
+def test_strip_vmprint_empty_input():
+    assert strip_vmprint_file_link_block("") == ""
+    assert strip_vmprint_file_link_block("   \n\n  ") == "   \n\n  "
+
+
+def test_strip_vmprint_very_long_input():
+    long_text = "A" * 100_000
+    assert strip_vmprint_file_link_block(long_text) == long_text

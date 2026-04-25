@@ -6,13 +6,6 @@ from unittest.mock import patch
 
 import pytest
 
-from base.tools import ToolContext
-
-
-@pytest.fixture()
-def ctx_u1():
-    return ToolContext(core=None, user_id="u1")
-
 
 def test_search_finds_files_in_sandbox_and_share(ctx_u1):
     from tools import builtin as bi

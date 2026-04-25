@@ -142,4 +142,10 @@ def test_handler_factory_exists_and_returns_callable(module_name, factory_name, 
 
 def test_all_factories_count():
     """Sanity check: we have the expected number of handler factories (avoids forgetting one)."""
-    assert len(ROUTE_FACTORIES) >= 34, "Expected at least 34 handler factories; update ROUTE_FACTORIES if you added routes"
+    # Current count: 38 factories across lifecycle, inbound, config_api, files, memory_routes,
+    # knowledge_base_routes, plugins_api, misc_api, ui_routes, websocket_routes.
+    _MIN_EXPECTED_FACTORIES = 34
+    assert len(ROUTE_FACTORIES) >= _MIN_EXPECTED_FACTORIES, (
+        f"Expected at least {_MIN_EXPECTED_FACTORIES} handler factories; "
+        f"found {len(ROUTE_FACTORIES)}. Update ROUTE_FACTORIES if you added routes."
+    )

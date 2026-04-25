@@ -4,6 +4,17 @@ Tests for Portal peers.yml handling in config_api (no TestClient dependency).
 from pathlib import Path
 
 
+def test_peers_load_handles_empty_peers_list(monkeypatch, tmp_path):
+    """Empty peers list should return a valid dict with empty peers."""
+    import portal.config_api as api_mod
+
+    monkeypatch.setattr(api_mod, "get_config_dir", lambda: tmp_path)
+    (tmp_path / "peers.yml").write_text("peers: []\n", encoding="utf-8")
+    data = api_mod.load_config_for_api("peers")
+    assert isinstance(data, dict)
+    assert data.get("peers") == []
+
+
 def test_peers_load_redacts_inline_api_key(monkeypatch, tmp_path):
     import portal.config_api as api_mod
 
@@ -50,5 +61,6 @@ def test_peers_update_keeps_redacted_api_key(monkeypatch, tmp_path):
     )
     assert ok is True
     raw = Path(tmp_path / "peers.yml").read_text(encoding="utf-8")
-    assert "https://new.example.com" in raw
-    assert "original_secret" in raw
+    assert "https://new.example.com" in raw, "New base_url should be persisted"
+    assert "original_secret" in raw, "Original api_key should be preserved when redaction marker is passed"
+    assert "https://old.example.com" not in raw, "Old base_url should be replaced"

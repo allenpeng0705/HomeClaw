@@ -9,23 +9,6 @@ from tests.sync_asgi_client import SyncASGIClient
 
 
 @pytest.fixture
-def portal_temp_config(monkeypatch, tmp_path):
-    """Point portal config and auth to tmp_path; create minimal config files."""
-    import portal.config as config_mod
-    import portal.auth as auth_mod
-    import portal.config_backup as cb_mod
-    import portal.config_api as api_mod
-    monkeypatch.setattr(config_mod, "get_config_dir", lambda: tmp_path)
-    monkeypatch.setattr(auth_mod, "get_config_dir", lambda: tmp_path)
-    monkeypatch.setattr(cb_mod, "get_config_dir", lambda: tmp_path)
-    monkeypatch.setattr(api_mod, "get_config_dir", lambda: tmp_path)
-    # Minimal llm.yml and core.yml so GET has content
-    (tmp_path / "llm.yml").write_text("main_llm: null\nembedding_llm: null\n", encoding="utf-8")
-    (tmp_path / "core.yml").write_text("name: core\nhost: 0.0.0.0\nport: 9000\n", encoding="utf-8")
-    return tmp_path
-
-
-@pytest.fixture
 def client():
     with SyncASGIClient(app) as c:
         yield c
@@ -64,9 +47,9 @@ def test_config_patch_with_session_returns_200(portal_temp_config, client):
     r = client.patch("/api/config/llm", json={"main_llm": "some_model"})
     assert r.status_code == 200
     assert r.json().get("result") == "ok"
-    # Verify file updated
+    # Verify file updated with the patched value
     content = (portal_temp_config / "llm.yml").read_text(encoding="utf-8")
-    assert "some_model" in content or "main_llm" in content
+    assert "some_model" in content, f"Expected 'some_model' in patched llm.yml, got: {content}"
 
 
 def test_config_get_core_redacts_auth_api_key(portal_temp_config, client):

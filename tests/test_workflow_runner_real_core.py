@@ -17,7 +17,8 @@ def test_real_core_runner_smoke(tmp_path: Path):
     runner = RealCoreRunner(root=root, trace_dir=tmp_path / "traces")
     try:
         runner.start()
-        assert runner.wait_ready(timeout_sec=5) in (True, False)
+        ready = runner.wait_ready(timeout_sec=5)
+        assert ready is True, f"Expected Core runner to be ready within 5s, got {ready}"
     finally:
         runner.stop()
 

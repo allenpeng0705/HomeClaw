@@ -1,5 +1,6 @@
 """
-Tests for Core refactor Phases 2–8: route_registration, initialization, inbound_handlers, session_channel, outbound, llm_loop, plugins_startup, media_utils, entry.
+Tests for Core refactor Phases 2–4: route_registration, initialization, inbound_handlers,
+session_channel, outbound, llm_loop, plugins_startup, media_utils, and entry point.
 
 Run from project root with conda env (e.g. conda activate pytorch):
   python -m pytest tests/test_core_refactor_phases2_4.py -v
@@ -11,6 +12,8 @@ and route_registration), run only the lightweight module tests:
 These tests verify that the extracted modules exist and expose the expected functions.
 They do NOT start full Core. For full regression, run the full suite when torch loads
 successfully, or do a manual smoke: start Core and hit /inbound, /process, /local_chat.
+
+Note: Phase 1 tests are in test_core_refactor_phase1.py.
 """
 
 import pytest
@@ -66,8 +69,10 @@ def test_route_registration_register_all_routes_with_mock_core():
     core.app = app
     core._pinggy_state_getter = lambda: {"public_url": None, "connect_url": None, "qr_base64": None, "error": None}
     register_all_routes(core)
-    # Should have registered routes (exception_handler and add_api_route / post decorators)
-    assert app.exception_handler.called or app.add_api_route.called
+    # add_api_route should have been called at least once to register routes.
+    # exception_handler is set on the app directly and may or may not be called
+    # depending on registration order, so we check the more reliable indicator.
+    assert app.add_api_route.called, "register_all_routes should have called app.add_api_route"
 
 
 # --- Phase 5: session_channel and outbound ---

@@ -1,57 +1,34 @@
-from __future__ import annotations
+"""Unit tests for daily-brief argument normalization and derivation (from tools.builtin)."""
 
-from pathlib import Path
-from typing import List
+import pytest
 
-
-def _load_normalizer():
-    root = Path(__file__).resolve().parents[1]
-    src = (root / "tools" / "builtin.py").read_text(encoding="utf-8")
-    start = src.index("def _normalize_daily_brief_args(")
-    end = src.index("\n\nasync def _run_skill_executor", start)
-    fn_src = src[start:end]
-    ns = {"List": List}
-    exec(fn_src, ns)
-    return ns["_normalize_daily_brief_args"]
+from tools.builtin import (
+    _normalize_daily_brief_args,
+    _derive_daily_brief_args_from_query,
+    _daily_brief_document_layout_from_user_query,
+    _merge_fetch_vmprint_document_layout,
+    _get_tools_config,
+)
 
 
-def _load_deriver(tools_cfg=None):
-    root = Path(__file__).resolve().parents[1]
-    src = (root / "tools" / "builtin.py").read_text(encoding="utf-8")
-    start = src.index("def _daily_brief_document_layout_from_user_query(")
-    start_drv = src.index("def _derive_daily_brief_args_from_query(")
-    end_drv = src.index("\n\nasync def _run_skill_executor", start_drv)
-    fn_src = src[start:end_drv]
-    _tc = dict(tools_cfg) if tools_cfg is not None else {}
-
-    def _get_tools_config():
-        return _tc
-
-    ns = {"List": List, "Optional": __import__("typing").Optional, "re": __import__("re"), "_get_tools_config": _get_tools_config}
-    exec(fn_src, ns)
-    return ns["_derive_daily_brief_args_from_query"]
-
-
-def _load_merge_and_layout():
-    root = Path(__file__).resolve().parents[1]
-    src = (root / "tools" / "builtin.py").read_text(encoding="utf-8")
-    start = src.index("def _daily_brief_document_layout_from_user_query(")
-    end = src.index("def _derive_daily_brief_args_from_query(", start)
-    fn_src = src[start:end]
-    ns = {"List": List, "Optional": __import__("typing").Optional, "_get_tools_config": lambda: {}}
-    exec(fn_src, ns)
-    return ns["_merge_fetch_vmprint_document_layout"], ns["_normalize_daily_brief_args"], ns["_daily_brief_document_layout_from_user_query"]
+def _set_tools_config(cfg):
+    """Temporarily override _get_tools_config for tests that need specific config."""
+    import tools.builtin as bi
+    original = bi._get_tools_config
+    bi._get_tools_config = lambda: cfg
+    try:
+        yield
+    finally:
+        bi._get_tools_config = original
 
 
 def test_daily_brief_normalizer_list_drops_noise():
-    fn = _load_normalizer()
-    out = fn(["list", "--max", "999", "--lang", "cn"])
+    out = _normalize_daily_brief_args(["list", "--max", "999", "--lang", "cn"])
     assert out == ["list"]
 
 
 def test_daily_brief_normalizer_fetch_vmprint_defaults_and_clamps():
-    fn = _load_normalizer()
-    out = fn(["fetch-vmprint", "--max", "500", "--lang", "jp", "--theme", "x", "--output_format", "txt"])
+    out = _normalize_daily_brief_args(["fetch-vmprint", "--max", "500", "--lang", "jp", "--theme", "x", "--output_format", "txt"])
     assert out == [
         "fetch-vmprint",
         "--max",
@@ -68,8 +45,7 @@ def test_daily_brief_normalizer_fetch_vmprint_defaults_and_clamps():
 
 
 def test_daily_brief_normalizer_supports_equals_style_flags():
-    fn = _load_normalizer()
-    out = fn(["fetch-vmprint", "--max=12", "--lang=cn", "--filter=AI", "--theme=minimal", "--output_format=pdf"])
+    out = _normalize_daily_brief_args(["fetch-vmprint", "--max=12", "--lang=cn", "--filter=AI", "--theme=minimal", "--output_format=pdf"])
     assert out == [
         "fetch-vmprint",
         "--max",
@@ -88,70 +64,73 @@ def test_daily_brief_normalizer_supports_equals_style_flags():
 
 
 def test_daily_brief_normalizer_markdown_fetch_keeps_no_vmprint_flags():
-    fn = _load_normalizer()
-    out = fn(["fetch", "--lang", "en", "--max", "20", "--theme", "minimal"])
+    out = _normalize_daily_brief_args(["fetch", "--lang", "en", "--max", "20", "--theme", "minimal"])
     assert out == ["fetch", "--max", "20", "--lang", "en"]
 
 
 def test_daily_brief_query_deriver_defaults_to_markdown_fetch():
-    fn = _load_deriver()
-    out = fn("今日新闻（20条，中文）")
+    out = _derive_daily_brief_args_from_query("今日新闻（20条，中文）")
     assert out == ["fetch", "--max", "20", "--lang", "cn"]
 
 
 def test_daily_brief_query_deriver_vmprint_when_config():
-    fn = _load_deriver({"long_document_output": "vmprint"})
-    out = fn("今日新闻（20条，中文）")
-    assert out == [
-        "fetch-vmprint",
-        "--max",
-        "20",
-        "--lang",
-        "cn",
-        "--theme",
-        "dispatch",
-        "--output_format",
-        "browser_preview_html",
-        "--document-layout",
-        "digest_table",
-    ]
+    import tools.builtin as bi
+    original = bi._get_tools_config
+    bi._get_tools_config = lambda: {"long_document_output": "vmprint"}
+    try:
+        out = _derive_daily_brief_args_from_query("今日新闻（20条，中文）")
+        assert out == [
+            "fetch-vmprint",
+            "--max",
+            "20",
+            "--lang",
+            "cn",
+            "--theme",
+            "dispatch",
+            "--output_format",
+            "browser_preview_html",
+            "--document-layout",
+            "digest_table",
+        ]
+    finally:
+        bi._get_tools_config = original
 
 
 def test_daily_brief_query_deriver_杂志排版_selects_magazine_layout():
-    fn = _load_deriver()
-    out = fn("今日新闻 20条 中文 杂志排版")
+    out = _derive_daily_brief_args_from_query("今日新闻 20条 中文 杂志排版")
     assert "--document-layout" in out
     assert out[out.index("--document-layout") + 1] == "magazine"
 
 
 def test_daily_brief_query_deriver_杂志格式_selects_magazine():
-    fn = _load_deriver()
-    out = fn("今日新闻 （中文，10条）杂志格式")
+    out = _derive_daily_brief_args_from_query("今日新闻 （中文，10条）杂志格式")
     assert out[out.index("--document-layout") + 1] == "magazine"
 
 
 def test_merge_fetch_vmprint_layout_overrides_digest_table():
-    merge, norm, layout_fn = _load_merge_and_layout()
-    assert layout_fn("今日新闻 杂志格式") == "magazine"
-    base = norm(["fetch-vmprint", "--max", "10", "--lang", "cn"])
+    assert _daily_brief_document_layout_from_user_query("今日新闻 杂志格式") == "magazine"
+    base = _normalize_daily_brief_args(["fetch-vmprint", "--max", "10", "--lang", "cn"])
     assert base[base.index("--document-layout") + 1] == "digest_table"
-    merged = merge(base, "magazine")
+    merged = _merge_fetch_vmprint_document_layout(base, "magazine")
     assert merged[merged.index("--document-layout") + 1] == "magazine"
 
 
 def test_daily_brief_query_deriver_newspaper_layout_keyword():
-    fn = _load_deriver()
-    out = fn("今日新闻 20条 中文 头版")
+    out = _derive_daily_brief_args_from_query("今日新闻 20条 中文 头版")
     assert out[out.index("--document-layout") + 1] == "newspaper"
 
 
 def test_daily_brief_normalizer_accepts_newspaper_layout():
-    fn = _load_normalizer()
-    out = fn(["fetch-vmprint", "--max", "10", "--lang", "cn", "--document-layout", "newspaper"])
+    out = _normalize_daily_brief_args(["fetch-vmprint", "--max", "10", "--lang", "cn", "--document-layout", "newspaper"])
     assert out[out.index("--document-layout") + 1] == "newspaper"
 
 
 def test_daily_brief_query_deriver_markdown_override():
-    fn = _load_deriver({"long_document_output": "vmprint"})
-    out = fn("今日新闻 15条 中文，纯Markdown输出")
-    assert out == ["fetch", "--max", "15", "--lang", "cn"]
+    import tools.builtin as bi
+    original = bi._get_tools_config
+    bi._get_tools_config = lambda: {"long_document_output": "vmprint"}
+    try:
+        out = _derive_daily_brief_args_from_query("今日新闻 15条 中文，纯Markdown输出")
+        assert out == ["fetch", "--max", "15", "--lang", "cn"]
+    finally:
+        bi._get_tools_config = original

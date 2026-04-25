@@ -9,16 +9,6 @@ from tests.sync_asgi_client import SyncASGIClient
 
 
 @pytest.fixture
-def portal_temp_config(monkeypatch, tmp_path):
-    """Point portal config and auth to tmp_path."""
-    import portal.config as config_mod
-    import portal.auth as auth_mod
-    monkeypatch.setattr(config_mod, "get_config_dir", lambda: tmp_path)
-    monkeypatch.setattr(auth_mod, "get_config_dir", lambda: tmp_path)
-    return tmp_path
-
-
-@pytest.fixture
 def client():
     with SyncASGIClient(app) as c:
         yield c
@@ -118,4 +108,5 @@ def test_logout_clears_cookie_and_redirects(portal_temp_config, client):
     assert r.headers.get("location") == "/app/login"
     # Cookie should be cleared (max-age=0 or missing)
     set_cookie = r.headers.get("set-cookie") or ""
-    assert "portal_session" in set_cookie.lower() or "max-age=0" in set_cookie.lower()
+    # Cookie cleared: either portal_session appears (to clear it) or max-age=0 is set.
+    assert "max-age=0" in set_cookie.lower(), f"Cookie should be cleared with max-age=0, got: {set_cookie}"

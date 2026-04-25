@@ -36,7 +36,11 @@ def test_merge_fills_categories_and_descriptions():
         default_descriptions=DEFAULT_CATEGORY_DESCRIPTIONS,
     )
     assert isinstance(merged.get("categories"), list)
-    assert len(merged["categories"]) >= 10
+    # Intent categories include at least these standard groups:
+    # search_web, weather, greeting, identity_capabilities, general_chat, news, etc.
+    # Update this constant if categories are added or reorganized.
+    _MIN_EXPECTED_CATEGORIES = 10
+    assert len(merged["categories"]) >= _MIN_EXPECTED_CATEGORIES
     assert merged["category_descriptions"].get("greeting")
     assert isinstance(merged.get("_doc_pattern_entries"), list)
     assert merged.get("category_tools", {}).get("weather", {}).get("skills")
