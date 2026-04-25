@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["PyYAML>=6.0"]
+# ///
 """
 Meta Social (Facebook Page + Instagram) request script for run_skill.
 
@@ -16,6 +20,8 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlencode
 
+import yaml
+
 
 def _skill_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -29,7 +35,6 @@ def _get_token() -> str:
     config_yml = _skill_root() / "config.yml"
     if config_yml.is_file():
         try:
-            import yaml
             with open(config_yml, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             token = (data.get("meta_access_token") or "").strip()
