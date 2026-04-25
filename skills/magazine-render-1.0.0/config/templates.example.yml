@@ -1,30 +1,13 @@
-# Optional template overrides for magazine-render-1.0.0.
+# DEPRECATED — config/templates.yml is not used by render_magazine.py
 #
-# This file is an example; copy to templates.yml and edit if you want.
-# If templates.yml is missing, the script uses built-in templates.
+# The skill builds AST from Python functions (_daily_brief_magazine_ast, etc.)
+# and does not read a templates.yml file at render time.
 #
-# Template format (very lightweight):
-# - title: default title for the report
-# - sections: ordered list of sections; each section has a header and a list path in the input JSON
+# Keeping this file in place as a reminder:
+# If you want user-editable templates in a future version, wire them up via
+# render_magazine.py's argument parser (--template-name flag → load from YAML).
 #
-# NOTE: This is intentionally simple for the MVP. If you need more control, keep using Markdown input.
-
-templates:
-  daily_brief:
-    title: "Daily Brief"
-    sections:
-      - header: "Top stories"
-        list_path: "items"
-
-  weather:
-    title: "Weather"
-    sections:
-      - header: "Now"
-        list_path: "now"
-
-  stock:
-    title: "Stocks"
-    sections:
-      - header: "Watchlist"
-        list_path: "watchlist"
-
+# For now, the only customization paths are:
+# - --theme dispatch|minimal (built into the Python AST builders)
+# - --document-layout digest_table|magazine|newspaper (daily brief path)
+# - --chrome-template <path> (AST chrome overlay for daily-brief magazine mode)

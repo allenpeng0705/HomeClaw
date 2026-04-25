@@ -7,21 +7,18 @@ description: |
 homepage: https://github.com/allenpeng0705/HomeClaw
 trigger:
   patterns:
-    - "magazine\\s*(pdf|style|layout)?"
-    - "make\\s*(this|it)?\\s*(pretty|beautiful|readable|nic(er|ely)|well\\s*formatted)"
-    - "format\\s*(this|it)?\\s*(nicely|beautifully)"
-    - "export\\s*(this|it)?\\s*as\\s*pdf"
-    - "render\\s*(this|it)?\\s*as\\s*pdf"
-    - "杂志\\s*风格|杂志\\s*排版|排版\\s*更\\s*好看|导出\\s*pdf|生成\\s*pdf"
-    - "今日新闻.*(漂亮|好看|美观|排版|杂志)|每日简报.*(漂亮|好看|美观|排版|杂志)"
-    - "(daily\\s*brief|morning\\s*report).*(pretty|beautiful|readable|magazine|well\\s*formatted)"
+    - "magazine\\s*(pdf|style|layout|render)"
+    - "(make|get|give).*(magazine|broadsheet|editorial).*(pdf|output|layout)"
+    - "export.*magazine.*pdf"
+    - "排版.*杂志|杂志.*PDF|杂志.*风格.*导出"
   instruction: |
     The user wants a prettier / more readable report output. Use AST-first VMPrint rendering for better UI control.
 
-    If the request is about daily brief/news digest with pretty-layout intent, run in two steps:
-    1) fetch digest:
-       run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["fetch", "--max", "20", "--lang", "cn|all"])
-    2) convert digest JSON -> VMPrint AST and render:
+    Daily brief / news digest with pretty-layout intent — two steps:
+    1) Fetch digest (optionally narrow with --feed NAME to select specific sources, --filter KEYWORD, --lang en|cn|all):
+       run_skill(skill_name="daily-brief-1.0.0", script="fetch_rss.py", args=["fetch-vmprint", "--max", "20", "--lang", "all"])
+       Example with specific feed: args=["fetch-vmprint", "--feed", "36", "--max", "15", "--lang", "all"]
+    2) Convert digest JSON -> VMPrint artifact:
        run_skill(skill_name="magazine-render-1.0.0", script="render_magazine.py",
                 args=["render-daily-brief-ast", "--title", "Daily Brief", "--theme", "dispatch", "--json", "<DAILY_BRIEF_JSON>", "--output_format", "browser_preview_html", "--out", "daily_brief.preview.html"])
     Return highlights + preview link; do not stop at raw Markdown.

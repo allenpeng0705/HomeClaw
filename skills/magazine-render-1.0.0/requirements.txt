@@ -1,0 +1,9 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#     "PyYAML>=6.0",
+# ]
+# ///
+# Magazine-render skill — minimal deps.
+# HomeClaw runs this via run_skill; Node.js (VMPrint CLI) must be on PATH for AST modes.
+# markdown-pdf via markdown (pip install markdown) if using render-md fallback.
