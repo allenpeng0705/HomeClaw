@@ -6,12 +6,16 @@ description: |
 homepage: https://github.com/HKUDS/CLI-Anything
 trigger:
   patterns:
-    - "cli-anything|agent-harness|run\\s+cli\\s+for\\s+me"
+    - "cli-anything"
+    - "cli-anything-[a-z]+"
   instruction: |
-    The user is asking to use a CLI-Anything generated CLI. Use run_skill with skill_name="cli-anything-bridge-1.0.0"
-    and script="run_cli_anything.py". Start with a safe dry run:
-      args=["exec", "--bin", "<binary>", "--args-json", "[\"--help\"]"]
-    Then run specific commands only when user intent is clear.
+    The user is asking to use a CLI-Anything generated CLI. Use run_skill:
+      args=["exec", "--bin", "<cli-anything-toolname>", "--args-json", "[\"--help\"]"]
+    Start with --help to discover available commands.
+    When the CLI supports --json flag, add it to get structured output.
+    To save generated artifacts to output folder:
+      args=["copy-out", "--source", "<file_path>", "--out-name", "<output_name.ext>"]
+    The copy-out command returns output_rel_path at the top level for run_skill link appending.
 ---
 
 # cli-anything-bridge-1.0.0

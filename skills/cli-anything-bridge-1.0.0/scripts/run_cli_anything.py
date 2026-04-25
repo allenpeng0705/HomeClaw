@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = []
+# ///
 """
 Run selected CLI-Anything binaries with safety guardrails.
 
 Prints exactly one JSON line:
-  {"success": true|false, "message": "...", "data": {...}}
+  {"success": true|false, "message": "...", "data": {...}, "output_rel_path": "..."}
 """
 
 from __future__ import annotations
@@ -292,10 +296,10 @@ def main() -> None:
     try:
         if args.cmd == "copy-out":
             abs_dst, out_rel = _copy_to_output(str(args.source), str(args.out_name or ""))
-            _ok(
-                "Artifact copied to output",
-                {"source": str(args.source), "output_abs_path": abs_dst, "output_rel_path": out_rel},
-            )
+            print(json.dumps(
+                {"success": True, "message": "Artifact copied to output", "output_rel_path": out_rel, "data": {"source": str(args.source), "output_abs_path": abs_dst}},
+                ensure_ascii=False,
+            ))
             return
 
         if args.cmd != "exec":
