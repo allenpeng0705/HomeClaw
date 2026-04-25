@@ -1,96 +1,96 @@
 ---
 name: answeroverflow
-description: Search indexed Discord community discussions via Answer Overflow. Find solutions to coding problems, library issues, and community Q&A that only exist in Discord conversations.
+description: |
+  Search indexed Discord community discussions via Answer Overflow. Find solutions to coding problems, library issues, and community Q&A that only exist in Discord conversations. Uses the Answer Overflow MCP server — no API key required.
+keywords: [discord, answer overflow, community qa, search, tRPC, prisma, nextjs]
 trigger:
-  patterns: ["answer\\s+overflow|discord\\s+search|discord\\s+community|answeroverflow\\.com"]
-  instruction: "The user asked to search Discord/Answer Overflow for community Q&A. Use web_search with site:answeroverflow.com or fetch markdown URLs (/m/...). See skill body for URL format."
+  patterns: ["answeroverflow|answer\\s*overflow"]
+  instruction: |
+    The user wants to search Discord community Q&A via Answer Overflow. Use run_skill:
+      run_skill(skill_name='answeroverflow-1.0.2', script='request.py', args=['search', '<query>', '[limit]'])
+    To discover servers: args=['servers', '[query]', '[limit]']
+    To fetch a thread: args=['thread', '<thread_id>', '[limit]']
+    To find similar threads: args=['similar', '<query>', '<server_id>', '[n]']
+    To explore by topic: args=['explore', '[topic]']
+    Run search first to find thread IDs, then thread to get full conversation.
+    Example: search "prisma connection pooling" → find thread → thread <id>
 ---
 
 # Answer Overflow Skill
 
-Search indexed Discord community discussions via Answer Overflow. Great for finding solutions to coding problems, library issues, and community Q&A.
+Search indexed Discord community discussions via [Answer Overflow](https://www.answeroverflow.com). No API key required — uses the public MCP server.
 
-## What is Answer Overflow?
+## run_skill
 
-Answer Overflow indexes public Discord support channels and makes them searchable via Google and direct API access. Perfect for finding answers that only exist in Discord conversations.
-
-## Quick Search
-
-Use web_search to find Answer Overflow results:
-```bash
-# Search for a topic (Answer Overflow results often appear in Google)
-web_search "site:answeroverflow.com prisma connection pooling"
+```text
+run_skill(skill_name='answeroverflow-1.0.2', script='request.py', args=['search', 'nextjs app router'])
+run_skill(..., args=['servers', 'prisma'])
+run_skill(..., args=['thread', '1091112171133489162'])
 ```
 
-## Fetching Thread Content
+| Action | Args | Description |
+|--------|------|-------------|
+| Search | `["search", "<query>", "[limit]"]` | Search all indexed Discord communities |
+| Servers | `["servers", "[query]", "[limit]"]` | Discover indexed Discord servers |
+| Thread | `["thread", "<thread_id>", "[limit]"]` | Fetch full thread conversation |
+| Similar | `["similar", "<query>", "<server_id>", "[n]"]` | Find threads similar to query |
+| Explore | `["explore", "[topic]"]` | Discover servers + top threads by topic |
 
-### Markdown URLs
-Add `/m/` prefix or `.md` suffix to get markdown-formatted content:
+## How it works
 
+Answer Overflow indexes **public Discord support channels** and exposes them via an MCP server. This skill wraps the MCP tools:
+
+| MCP Tool | Used by |
+|----------|---------|
+| `search_answeroverflow` | `search` command |
+| `search_servers` | `servers` and `explore` commands |
+| `get_thread_messages` | `thread` command |
+| `find_similar_threads` | `similar` command |
+
+## Typical workflow
+
+1. **Search** for your topic:
+   `["search", "prisma many-to-many relation"]`
+2. Note the `threadId` from results
+3. **Fetch the thread** for full context:
+   `["thread", "<thread_id>"]`
+4. Or **explore** a server:
+   `["explore", "prisma"]` — shows servers + top threads
+
+## Example searches
+
+| Query | What you get |
+|-------|-------------|
+| `prisma connection pooling` | Prisma server threads about DB pooling |
+| `nextjs app router redirect` | Next.js server threads about routing |
+| `tRPC middleware auth` | tRPC server threads about auth middleware |
+
+## Thread URL format
+
+Threads on answeroverflow.com look like:
 ```
-# Standard URL
-https://www.answeroverflow.com/m/1234567890123456789
-
-# With .md suffix (alternative)
-https://www.answeroverflow.com/m/1234567890123456789.md
+https://www.answeroverflow.com/m/<message_id>
 ```
 
-### Using web_fetch
-```bash
-# Fetch a thread in markdown format
-web_fetch url="https://www.answeroverflow.com/m/<message-id>"
-```
-
-### Accept Header
-When making requests, the API checks for `Accept: text/markdown` header to return markdown format.
-
-## MCP Server (Reference)
-
-Answer Overflow has an MCP server at `https://www.answeroverflow.com/mcp` with these tools:
-
-| Tool | Description |
-|------|-------------|
-| `search_answeroverflow` | Search across all indexed Discord communities. Can filter by server or channel ID. |
-| `search_servers` | Discover Discord servers indexed on Answer Overflow. Returns server IDs for filtered searching. |
-| `get_thread_messages` | Get all messages from a specific thread/discussion. |
-| `find_similar_threads` | Find threads similar to a given thread. |
-
-## URL Patterns
-
-| Pattern | Example |
-|---------|---------|
-| Thread | `https://www.answeroverflow.com/m/<message-id>` |
-| Server | `https://www.answeroverflow.com/c/<server-slug>` |
-| Channel | `https://www.answeroverflow.com/c/<server-slug>/<channel-slug>` |
-
-## Common Searches
-
-```bash
-# Find Discord.js help
-web_search "site:answeroverflow.com discord.js slash commands"
-
-# Find Next.js solutions
-web_search "site:answeroverflow.com nextjs app router error"
-
-# Find Prisma answers
-web_search "site:answeroverflow.com prisma many-to-many"
-```
+The `thread_id` in commands is the numeric ID from the URL.
 
 ## Tips
 
-- Results are real Discord conversations, so context may be informal
-- Threads often have back-and-forth discussion before the solution
-- Check the server/channel name to understand the context (e.g., official support vs community)
-- Many open source projects index their Discord support channels here
+- Results are real Discord conversations — context may be informal
+- Threads often have back-and-forth before the solution
+- Check `serverName` / `channelName` to understand the community
+- Many open-source projects index their Discord support here (Prisma, tRPC, Kinde, Next.js, etc.)
+- `search_servers` returns server IDs useful for filtered searches
 
-## Output
+## Limits
 
-- **Response:** Use plain text or Markdown in your reply. When you fetch a thread or cite a result, include the link (e.g. `https://www.answeroverflow.com/m/<message-id>`).
-- **Saving to file:** If the user asks to save results or a thread, use **file_write** with path **output/<filename>** (e.g. `output/answeroverflow-thread-123.md`). That path goes to the user's private output folder (`workspace/{user_id}/output/` or `companion/output/`). You can return a short summary in chat plus "Saved to output/…" or a link to open the file if Core is configured with file serving.
+- Search: max 25 results per call
+- Thread messages: max 100 per call
+- Similar threads: max 10 per call
+- No authentication required — public MCP endpoint
 
 ## Links
 
 - **Website:** https://www.answeroverflow.com
-- **Docs:** https://docs.answeroverflow.com
-- **MCP:** https://www.answeroverflow.com/mcp
+- **MCP Docs:** https://www.answeroverflow.com/mcp
 - **Discord:** https://discord.answeroverflow.com
