@@ -1,14 +1,19 @@
 ---
 name: summarize
-description: Summarize URLs or files with the summarize CLI (web, PDFs, images, audio, YouTube).
+description: Summarize URLs, files, or documents using the summarize CLI (web, PDFs, images, audio, YouTube).
 homepage: https://summarize.sh
 trigger:
   patterns:
-    - "summarize\\s+(this\\s+)?(url|link|page|article|file|content)"
+    - "summarize\\s+(this|that|the|my)?\\s*(url|link|page|article|file|content|webpage)"
     - "(can\\s+you\\s+)?summarize\\s+this"
-    - "总结.*(文章|网页|链接|URL|内容)"
-    - "给我总结一下"
-  instruction: "The user asked to summarize a URL, link, page, or file. Use run_skill(skill_name='summarize-1.0.0', ...) with the URL or path in args. For long/structured summaries, prefer vmprint_render with output_format='browser_preview_html' and return the preview link; generate PDF when explicitly requested."
+    - "(给我|帮我)?\\s*总结一下"
+    - "总结.*(文章|网页|链接|这段|这个链接)"
+  instruction: |
+    The user asked to summarize content from a URL, file, or link. Use run_skill:
+      args=["<url or file path>", "--model", "<model>", "--length", "<short|medium|long>"]
+    Example: args=["https://example.com", "--model", "google/gemini-2.5-flash", "--length", "medium"]
+    With --json: args=["<url>", "--json"] to get structured JSON output.
+    Return the summary text in your reply. For long structured content, suggest vmprint_render preview after summarizing.
 ---
 
 # Summarize

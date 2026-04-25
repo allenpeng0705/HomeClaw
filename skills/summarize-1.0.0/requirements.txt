@@ -1,0 +1,7 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = []
+# ///
+
+# summarize skill: wraps the summarize CLI binary (curl -Ls https://summarize.sh/install | sh).
+# No Python dependencies — stdlib only (subprocess, shutil, json, argparse).
