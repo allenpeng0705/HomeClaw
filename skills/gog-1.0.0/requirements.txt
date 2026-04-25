@@ -1,0 +1,7 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = []
+# ///
+
+# gog is a brew-installed CLI tool. No Python dependencies.
+# Install: brew install gogcli/tap/gog

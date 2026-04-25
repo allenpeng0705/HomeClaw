@@ -1,38 +1,60 @@
 ---
 name: gog
-description: Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Sheets, and Docs.
+description: Google Workspace CLI for Gmail, Calendar, Drive, Contacts, Sheets, and Docs via gog CLI.
 homepage: https://gogcli.sh
 trigger:
-  patterns: ["gog|gmail|google\\s+calendar|google\\s+drive|google\\s+sheets|google\\s+docs|gmail\\s+search|gmail\\s+send"]
-  instruction: "The user asked about Gmail, Google Calendar, Drive, Sheets, or Docs. Use gog CLI; ensure OAuth is done (gog auth). run_skill or exec gog with subcommands per skill body."
+  patterns:
+    - "gog\\s+(gmail|calendar|drive|contacts|sheets|docs|auth)"
+    - "gog\\s+(send|search|list|events|cat|get|update|export)"
+    - "gmail\\s+(search|send|list)"
+    - "google\\s+(calendar|sheets|drive|docs)"
+    - "(google\\s+)?workspace"
+  instruction: |
+    The user asked about Gmail, Google Calendar, Drive, Sheets, Docs, or Contacts via gog.
+    Use run_skill with the appropriate subcommand args:
+      args=["gmail", "--search", "<query>", "--max", "10"]
+      args=["gmail", "--to", "<email>", "--subject", "<subject>", "--body", "<body>"]
+      args=["calendar", "--list-events", "--from", "<iso>", "--to", "<iso>"]
+      args=["drive", "--search", "<query>", "--max", "10"]
+      args=["contacts", "--list", "--max", "20"]
+      args=["sheets", "--get", "<sheetId>", "<range>", "--json"]
+      args=["sheets", "--update", "<sheetId>", "<range>", "--values-json", "<json>"]
+      args=["docs", "--cat", "<docId>"]
+      args=["auth", "--status"]
+    For any gog subcommand, use args=["raw", "<subcommand>", ...args] as fallback.
+    Requires OAuth setup: gog auth credentials + gog auth add.
 ---
 
 # gog
 
 Use `gog` for Gmail/Calendar/Drive/Contacts/Sheets/Docs. Requires OAuth setup.
 
-Setup (once)
-- `gog auth credentials /path/to/client_secret.json`
-- `gog auth add you@gmail.com --services gmail,calendar,drive,contacts,sheets,docs`
-- `gog auth list`
+## Setup (once)
 
-Common commands
-- Gmail search: `gog gmail search 'newer_than:7d' --max 10`
-- Gmail send: `gog gmail send --to a@b.com --subject "Hi" --body "Hello"`
-- Calendar: `gog calendar events <calendarId> --from <iso> --to <iso>`
-- Drive search: `gog drive search "query" --max 10`
-- Contacts: `gog contacts list --max 20`
-- Sheets get: `gog sheets get <sheetId> "Tab!A1:D10" --json`
-- Sheets update: `gog sheets update <sheetId> "Tab!A1:B2" --values-json '[["A","B"],["1","2"]]' --input USER_ENTERED`
-- Sheets append: `gog sheets append <sheetId> "Tab!A:C" --values-json '[["x","y","z"]]' --insert INSERT_ROWS`
-- Sheets clear: `gog sheets clear <sheetId> "Tab!A2:Z"`
-- Sheets metadata: `gog sheets metadata <sheetId> --json`
-- Docs export: `gog docs export <docId> --format txt --out /tmp/doc.txt`
-- Docs cat: `gog docs cat <docId>`
+```bash
+gog auth credentials /path/to/client_secret.json
+gog auth add you@gmail.com --services gmail,calendar,drive,contacts,sheets,docs
+gog auth list
+```
 
-Notes
+## run_skill commands
+
+| Task | Args |
+|------|------|
+| Search Gmail | `["gmail", "--search", "<gmail-query>", "--max", "10"]` |
+| Send email | `["gmail", "--to", "<email>", "--subject", "<sub>", "--body", "<body>"]` |
+| List calendar events | `["calendar", "--list-events", "--from", "<iso>", "--to", "<iso>"]` |
+| Search Drive | `["drive", "--search", "<query>", "--max", "10"]` |
+| List contacts | `["contacts", "--list", "--max", "20"]` |
+| Read Sheets range | `["sheets", "--get", "<sheetId>", "<range>", "--json"]` |
+| Update Sheets range | `["sheets", "--update", "<sheetId>", "<range>", "--values-json", "<json>"]` |
+| Read Docs | `["docs", "--cat", "<docId>"]` |
+| Auth status | `["auth", "--status"]` |
+| Raw gog command | `["raw", "<subcommand>", ...args]` |
+
+## Notes
+
 - Set `GOG_ACCOUNT=you@gmail.com` to avoid repeating `--account`.
-- For scripting, prefer `--json` plus `--no-input`.
-- Sheets values can be passed via `--values-json` (recommended) or as inline rows.
-- Docs supports export/cat/copy. In-place edits require a Docs API client (not in gog).
+- For scripting, prefer `--json` where available.
 - Confirm before sending mail or creating events.
+- In-place Docs edits require a Docs API client (not in gog).
