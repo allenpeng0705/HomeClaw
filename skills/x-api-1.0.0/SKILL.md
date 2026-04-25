@@ -4,8 +4,18 @@ description: |
   Post tweets and read timeline via X (Twitter) API v2. Use when the user wants to post a tweet or read their X timeline and you have X_ACCESS_TOKEN (or x_access_token in config) set.
 compatibility: Requires network access and X_ACCESS_TOKEN (OAuth 2.0 user access token from developer.x.com)
 trigger:
-  patterns: ["post.*tweet|tweet.*post|post to (x|twitter)|x\\.com.*post|twitter api|X API|发.*[Xx]|发一条.*[Xx]|帮.*发.*[Xx]|发推|发推特"]
-  instruction: "User asked to post a tweet or use X (Twitter) API. Use run_skill with script request.py: post <text> to create a tweet, or get [max_results] to read timeline. Requires X_ACCESS_TOKEN (OAuth 2.0 user token from developer.x.com)."
+  patterns:
+    - "(post|tweet|send)\\s+(a\\s+)?tweet"
+    - "(post|send)\\s+tweet\\s+to\\s+(x|twitter)"
+    - "tweet\\s+from\\s+(x|twitter)\\s+account"
+    - "twitter\\s+api|x\\s*api"
+    - "(post|send)\\s+(this|my)\\s+(tweet|message)\\s+to\\s+(x|twitter)"
+    - "发(推|一条推特)"
+  instruction: |
+    User asked to post a tweet or read X/Twitter timeline. Use run_skill:
+      args=["post", "<text>"]  — post a tweet
+      args=["get", "[max_results]"]  — read timeline (default 10)
+    Requires X_ACCESS_TOKEN (OAuth 2.0 user token from developer.x.com).
 ---
 
 # X (Twitter) API v2

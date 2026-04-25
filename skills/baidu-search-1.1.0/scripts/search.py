@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["requests>=2.28.0", "PyYAML>=6.0"]
+# ///
 """
 Baidu AI Search (智能搜索生成) via Qianfan API.
 Uses POST /v2/ai_search/chat/completions: search + AI summarization.
@@ -8,12 +12,15 @@ Usage: python search.py '<JSON>'
   JSON must include "query". Optional: model, search_source, resource_type_filter,
   search_recency_filter, search_filter, instruction, stream, enable_deep_search, etc.
 """
+from __future__ import annotations
+
 import json
 import os
 import sys
 from pathlib import Path
 
 import requests
+import yaml
 
 _API_URL = "https://qianfan.baidubce.com/v2/ai_search/chat/completions"
 _TIMEOUT = 90
@@ -34,7 +41,6 @@ def _get_api_key() -> str:
     config_yml = _skill_root() / "config.yml"
     if config_yml.is_file():
         try:
-            import yaml
             with open(config_yml, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             key = (data.get("api_key") or "").strip()

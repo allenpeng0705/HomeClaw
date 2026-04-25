@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = []
+# ///
 """
 X (Twitter) API v2 request script for run_skill.
 
@@ -8,12 +12,15 @@ Supports:
 
 Token: X_ACCESS_TOKEN env, or this skill's config.yml (x_access_token). Env overrides config.
 """
+from __future__ import annotations
+
 import json
 import os
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlencode
 
 
 def _skill_root() -> Path:
@@ -39,11 +46,10 @@ def _get_token() -> str:
     return ""
 
 
-def _request(method: str, path: str, body: dict | None = None, params: dict | None = None) -> int:
+def _request(token: str, method: str, path: str, body: dict | None = None, params: dict | None = None) -> int:
     base = "https://api.twitter.com/2"
     url = f"{base.rstrip('/')}/{path.lstrip('/')}"
     if params:
-        from urllib.parse import urlencode
         url += "?" + urlencode(params)
     data = json.dumps(body).encode("utf-8") if body else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -69,7 +75,6 @@ def _request(method: str, path: str, body: dict | None = None, params: dict | No
 
 
 def main() -> int:
-    global token
     token = _get_token()
     if not token:
         print(
@@ -92,7 +97,7 @@ def main() -> int:
         if len(text) > 280:
             print("Error: Tweet text must be 280 characters or less.", file=sys.stderr)
             return 1
-        return _request("POST", "tweets", body={"text": text})
+        return _request(token, "POST", "tweets", body={"text": text})
     if action == "get":
         max_results = 10
         if len(sys.argv) > 2:
@@ -113,7 +118,7 @@ def main() -> int:
             if not user_id:
                 print("Error: Could not get user id from /users/me", file=sys.stderr)
                 return 1
-            return _request("GET", f"users/{user_id}/tweets", params={"max_results": max_results})
+            return _request(token, "GET", f"users/{user_id}/tweets", params={"max_results": max_results})
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="replace")
             print(f"HTTP {e.code}: {e.reason}\n{err_body}", file=sys.stderr)

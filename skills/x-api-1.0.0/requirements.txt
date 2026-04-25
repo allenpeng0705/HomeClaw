@@ -1,0 +1,6 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = []
+# ///
+
+# X API skill: uses stdlib urllib only (no pip deps).

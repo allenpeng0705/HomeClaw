@@ -2,7 +2,13 @@
 name: html-slides
 description: "Generate a 乔布斯-style minimal vertical single-page HTML presentation from the user's script (single file, open in browser). Use this skill when the user asks for 乔布斯/极简/竖屏/HTML slides. For standard PowerPoint (.pptx) use run_skill(skill_name='ppt-generation-1.0.0', script='create_pptx.py', args=[...]). Output goes to user/companion output folder; return the open link. Supports dark/light mode toggle, speaker notes (data-notes attribute), and 16:9 landscape via ?ratio=16/9."
 trigger:
-  patterns: ["乔布斯|极简.*演示|竖屏.*演示|HTML.*演示|单页.*演示|极简.*幻灯片|乔布斯.*幻灯片|HTML\\s*slides|html\\s*slides|html\\s*slide|生成.*HTML.*[Ss]lides|生成.*幻灯片|总结.*html|生成.*html.*slide|乔布斯.*极简|极简.*乔布斯"]
+  patterns:
+    - "乔布斯.*(风格|极简|演示|幻灯)"
+    - "极简.*(演示|幻灯片|风格)"
+    - "竖屏.*演示|单页.*演示"
+    - "html\\s*slides?|HTML.*演示"
+    - "生成.*乔布斯.*(演示|幻灯)"
+    - "极简科技.*(演示|幻灯)"
   instruction: |
     The user asked for 乔布斯-style, 极简, or HTML presentation/slides from a document. You HAVE the html-slides skill: (1) document_read(path) to get the file content, (2) use that text to generate the full HTML (all slides), (3) call save_result_page(title=..., content=<the full HTML you generated>, format='html') or file_write(path='output/...', content=<full HTML>).
 

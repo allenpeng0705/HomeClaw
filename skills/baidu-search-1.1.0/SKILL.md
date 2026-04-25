@@ -3,11 +3,13 @@ name: baidu-search
 description: "Use Baidu Qianfan 智能搜索生成 to search and get an AI-written summary in one call. Use this skill when the user asks for Baidu or 百度搜索. For generic 'search the web' or 'search for X' without mentioning Baidu, use the web_search tool instead."
 retry_safe: true
 trigger:
-  patterns: ["百度搜索|百度.*搜|Baidu\\s+search|智能搜索|用百度搜|baidu\\s+搜"]
-  instruction: "The user asked for Baidu search or 百度/智能搜索. Use run_skill(skill_name='baidu-search-1.1.0', script='search.py', args=['{\"query\": \"<search terms>\"}']). For plain 'search the web' or 'search for X' without mentioning Baidu, use the web_search tool instead."
-  auto_invoke:
-    script: search.py
-    args: ["{{query}}"]
+  patterns:
+    - "百度.*(搜索|搜)"
+    - "baidu\\s+search|用百度搜索|智能搜索"
+  instruction: |
+    The user asked for Baidu search or 百度/智能搜索. Use run_skill:
+      args=["{\"query\": \"<search terms>\"}"]
+    For plain 'search the web' without mentioning Baidu, use the web_search tool instead.
 ---
 
 # Baidu AI Search (智能搜索生成)

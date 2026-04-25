@@ -3,8 +3,12 @@ name: summarize
 description: Summarize URLs or files with the summarize CLI (web, PDFs, images, audio, YouTube).
 homepage: https://summarize.sh
 trigger:
-  patterns: ["summarize|summary|summarise|summarize\\s+(this\\s+)?(url|link|page|article|file)|总结|摘要"]
-  instruction: "The user asked to summarize a URL, link, page, or file. Use run_skill(skill_name='summarize-1.0.0', ...) with the URL or path in args, or use the skill's instructions (summarize CLI). For long/structured summaries, prefer vmprint_render with output_format='browser_preview_html' and return the preview link; generate PDF when explicitly requested."
+  patterns:
+    - "summarize\\s+(this\\s+)?(url|link|page|article|file|content)"
+    - "(can\\s+you\\s+)?summarize\\s+this"
+    - "总结.*(文章|网页|链接|URL|内容)"
+    - "给我总结一下"
+  instruction: "The user asked to summarize a URL, link, page, or file. Use run_skill(skill_name='summarize-1.0.0', ...) with the URL or path in args. For long/structured summaries, prefer vmprint_render with output_format='browser_preview_html' and return the preview link; generate PDF when explicitly requested."
 ---
 
 # Summarize

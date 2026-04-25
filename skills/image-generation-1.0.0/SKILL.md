@@ -4,12 +4,13 @@ description: Generate/edit images via Gemini, Baidu Qianfan (通用图像生成)
 keywords: "image generate create draw picture 图片 生成 创建 画图 做图 来一张图"
 trigger:
   patterns:
-    - "generate\\s+(an?|one)?\\s+image|create\\s+(an?|one)?\\s+image|make\\s+(an?|one)?\\s+image|draw\\s+(a\\s+)?(picture|image)"
-    - "创建.*图|生成.*图|画.*图|做.*图|给我.*图|来一张图|弄一张图|生成图片|创建图片"
-  instruction: "The user asked to generate or create an image. Call run_skill(skill_name='image-generation-1.0.0', script='generate_image.py', args=['--prompt', '<description>']) first. You may omit --filename; the script uses a unique name per run and saves to the user/companion output folder when run via run_skill. Do not say no image tool is available; do not invent 'Image saved:' — only the run_skill result contains that."
-  auto_invoke:
-    script: generate_image.py
-    args: ["--prompt", "{{query}}"]
+    - "generate\\s+(an?|one)\\s+image|create\\s+(an?|one)\\s+image|make\\s+(an?|one)\\s+image|draw\\s+(a\\s+)?picture"
+    - "创建.*图|生成.*图|画.*图|做.*图|给我.*图|来一张图|弄一张图"
+    - "(generate|create|make|draw)\\s+(some|another)\\s+image"
+  instruction: |
+    The user asked to generate or create an image. Call run_skill:
+      args=["--prompt", "<description>"]
+    The script auto-saves to output folder. Do not invent 'Image saved:' — only the run_skill result contains that.
 ---
 
 # Image Generation & Editing

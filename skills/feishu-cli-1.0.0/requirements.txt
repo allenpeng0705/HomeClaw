@@ -1,0 +1,8 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = []
+# ///
+
+# Feishu CLI is a Node.js tool wrapped by lark_cli_runner.py (Python).
+# No Python dependencies — stdlib only (subprocess, shutil, json, pathlib).
+# Install the CLI: npx @larksuite/cli@latest install

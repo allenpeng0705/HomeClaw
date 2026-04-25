@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = []
+# ///
 """
 Fetch current weather from wttr.in (no API key). Used by run_skill.
 
