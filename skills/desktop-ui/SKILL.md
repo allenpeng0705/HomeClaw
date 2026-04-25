@@ -2,11 +2,17 @@
 name: desktop-ui
 description: macOS-only desktop UI automation (screens, windows, menubar, click, type). Uses peekaboo CLI. Use when the user asks to control or inspect the desktop UI on macOS (e.g. list windows, click an element, capture screen). Not available on Windows or Linux; return a clear message on unsupported platforms.
 trigger:
-  patterns: ["desktop\\s+ui|peekaboo|list\\s+windows?|click\\s+(on\\s+)?(element|screen)|screen\\s+capture|桌面|自动化"]
-  instruction: "The user asked about desktop UI automation (macOS). Use run_skill(skill_name='desktop-ui', script='run.py', args=[list|image|see|click|type, ...]). macOS only; peekaboo required."
-  auto_invoke:
-    script: run.py
-    args: ["list", "windows"]
+  patterns:
+    - "desktop\\s*ui|peekaboo"
+    - "list\\s+(apps|windows)"
+    - "(click|type|see|image)\\s+.*(element|screen|window|ui)"
+    - "screen\\s+capture"
+    - "macos?\\s+(ui|automation|desktop)"
+  instruction: |
+    The user asked about macOS desktop UI automation. Use run_skill:
+      args=["<peekaboo-subcommand>", ...]
+    Common subcommands: list apps, list windows, see --annotate, click --on <id>, type <text>, image --path <path>
+    macOS only; peekaboo must be installed (brew install steipete/tap/peekaboo).
 ---
 
 # Desktop UI (macOS only)

@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
+# /// script
+# requires-python = ">=3.9"
+# dependencies = []
+# ///
 """
 Desktop UI skill runner: macOS-only, runs peekaboo CLI.
 On non-macOS or if peekaboo is missing, prints a clear error and exits; never crashes.
 """
+from __future__ import annotations
+
 import sys
 import subprocess
 import shutil

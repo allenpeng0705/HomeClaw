@@ -1,0 +1,7 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = []
+# ///
+
+# Desktop UI automation on macOS uses the peekaboo CLI tool (brew-only).
+# No Python dependencies — this skill is a thin wrapper around peekaboo.
