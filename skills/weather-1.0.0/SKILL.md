@@ -30,7 +30,7 @@ End users speak or type **normal questions** (“What’s the weather in Tokyo?�
 How the skill gets picked:
 
 1. **`trigger.patterns`** (this skill) — If the user message matches the regex list, Core **force-includes** this skill and appends **`trigger.instruction`** so the model is steered to call **`run_skill`** with **`get_weather.py`**.
-2. **`trigger.auto_invoke`** — If the model still does not call a tool, Core can run **`run_skill`** once with **`args: ["{{query}}"]`** (the raw user message).
+2. **Force-include** — If the user message matches `trigger.patterns`, Core **force-includes** this skill and appends **`trigger.instruction`** so the model calls **`run_skill`** with **`get_weather.py`**.
 3. **Keywords / RAG** — With vector skill search, **`keywords`** help retrieval; with **include-all** skills, the description alone helps the model pick weather among many skills.
 
 **Best practice for the model:** pass **`args=[ "<the user’s full message>" ]`** (or **`["{{query}}"]`** in triggers) so **`get_weather.py`** can parse place, time words (*tomorrow* / *明天*), and “full forecast” intent. A **city-only** arg like **`["Seoul"]`** is also fine.
