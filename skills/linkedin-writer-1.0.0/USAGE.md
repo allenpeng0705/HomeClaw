@@ -1,60 +1,77 @@
 # How to Use LinkedIn Writer (linkedin-writer-1.0.0) in HomeClaw
 
-**linkedin-writer-1.0.0** is a **guidance skill**: it has no `run.py` script. The model uses the skill’s **name and description** (and optionally the full **SKILL.md** body) from the “Available skills” block to write LinkedIn posts when you ask.
+**linkedin-writer-1.0.0** has a `scripts/request.py` that can draft posts, save drafts, and produce API-ready bodies for posting via maton-api-gateway.
 
 ---
 
-## 1. Make sure skills are enabled
+## 1. Enable skills
 
 In **config/core.yml**:
 
 ```yaml
 use_skills: true
 skills_dir: skills
-skills_max_in_prompt: 5   # enough to include linkedin-writer-1.0.0
+skills_max_in_prompt: 5
 ```
 
 Restart Core after changing config.
 
 ---
 
-## 2. Use it by asking in natural language
+## 2. Draft a post
 
-You don’t call `run_skill` for this skill. Just ask the assistant to write a LinkedIn post. Examples:
+Use **run_skill** with the script:
 
-- **“Write a LinkedIn post about how we lost our biggest client and what it taught us about customer success.”**
-- **“Use the LinkedIn Writer skill to write a post about [topic]. Tone: professional-casual.”**
-- **“I need a LinkedIn post for [idea]. Story format, end with a question.”**
+```text
+run_skill(skill_name="linkedin-writer-1.0.0", script="request.py",
+          args=["write", "--topic", "launching my first product", "--style", "story"])
+```
 
-The model sees **“LinkedIn Writer (run_skill skill_name: \`linkedin-writer-1.0.0\`): Writes LinkedIn posts that sound like a real person, not a content mill”** in the prompt and will write a post in that style.
+Optional args:
+- `--topic` — the main topic/idea (required)
+- `--content` — notes or key points to include
+- `--style` — `story` (default), `contrarian`, `list`, `lesson`, `behind-the-scenes`
+- `--tone` — `casual` (default), `professional-casual`, `thought-leader`
+
+The script outputs JSON with:
+- `post_text` — the formatted post (for chat reply)
+- `char_count` — character count (≤1300 optimal for reach)
+- `draft_saved_to` — e.g. `output/linkedin-draft-20260425.md`
+- `api_body_for_maton` — JSON body ready for maton-api-gateway
+- `maton_api_call` — structured call spec (app, path, method, body)
 
 ---
 
-## 3. What the skill defines (in SKILL.md)
+## 3. Post to LinkedIn (via maton-api-gateway)
 
-The full **SKILL.md** in this folder contains:
+After drafting, use the `maton_api_call` values to post:
 
-- **Post formats:** Story, Contrarian, List, Lesson Learned, Behind-the-Scenes  
-- **Hook formulas** and **formatting rules** (short paragraphs, line breaks, under ~1300 chars, end with a question)  
-- **Voice rules** (no buzzwords, first person, contractions, specific > generic)  
-- **What to ask the user** (topic, story, takeaway, tone, CTA) and a **quality check** list  
+```text
+run_skill(skill_name="maton-api-gateway-1.0.0", script="request.py",
+          args=["linkedin", "rest/posts", "POST", "<api_body>"])
+```
 
-**Currently**, only the **short description** above is injected into the prompt. If you want the **full SKILL.md** (formats, hooks, voice rules) injected so the model follows the guidelines more closely, you can request a config option such as `skills_include_body: true` in Core; then this skill’s full text would be included in “Available skills.”
+Or copy `api_body_for_maton` from the script output into the POST body.
 
 ---
 
-## 4. Optional: vector search for skills
+## 4. No topic? Ask first
 
-If you enable **skills_use_vector_search** in core.yml, the model retrieves skills by **similarity to your message**. Queries like “write a LinkedIn post” will then tend to pull in **linkedin-writer-1.0.0** when it’s relevant. No change to how you ask—just ask as above.
+If the user only says "write a LinkedIn post" with no topic, ask for the topic before calling the script. The script requires at least `--topic` or `--content`.
+
+---
+
+## 5. Just drafting, no posting
+
+If the user only wants the draft (not to post), call the script and present `post_text` and `draft_saved_to` in the reply.
 
 ---
 
 ## Summary
 
-| What you do | Example |
-|-------------|--------|
-| Enable skills | `use_skills: true`, `skills_dir: skills` in core.yml |
-| Ask for a post | “Write a LinkedIn post about [topic]” or “Use LinkedIn Writer to write…” |
-| No run_skill | This skill has no script; the model uses its description (and optionally full SKILL.md) to write the post |
-
-For more formats and templates (e.g. content calendars), see the skill’s README and the context packs link there.
+| Goal | How |
+|------|-----|
+| Draft a post | `run_skill(request.py, ["write", "--topic", "..."])` |
+| Get API body for maton | Look at `api_body_for_maton` in script output |
+| Post via maton | `run_skill(matton-api-gateway, ["linkedin", "rest/posts", "POST", body])` |
+| No topic yet | Ask user for topic first |
