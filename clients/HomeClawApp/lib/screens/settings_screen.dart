@@ -5,8 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
+import '../envoy/relay_client.dart';
+import '../providers/envoy_providers.dart';
 import '../providers/settings_providers.dart';
 import 'change_password_screen.dart';
+import 'envoy_pairing_screen.dart';
 import 'permissions_screen.dart';
 import 'scan_connect_screen.dart';
 import 'skills_screen.dart';
@@ -27,6 +30,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late TextEditingController _nodesUrlController;
   late TextEditingController _nodeIdController;
   late TextEditingController _execCommandController;
+  late TextEditingController _envoyUrlController;
   late final SettingsNotifier _settingsNotifier;
 
   @override
@@ -39,6 +43,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _nodesUrlController = TextEditingController(text: widget.coreService.nodesUrl ?? 'http://127.0.0.1:3020');
     _nodeIdController = TextEditingController(text: 'companion');
     _execCommandController = TextEditingController();
+    _envoyUrlController = TextEditingController(text: 'ws://192.168.1.100:3030/ws');
     if (widget.coreService.isLoggedIn) _loadMyAvatar();
   }
 
@@ -86,6 +91,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _nodesUrlController.dispose();
     _nodeIdController.dispose();
     _execCommandController.dispose();
+    _envoyUrlController.dispose();
     super.dispose();
   }
 
@@ -161,6 +167,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
+    final envoyState = ref.watch(envoyMeshProvider);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings'),
@@ -475,6 +482,149 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
               keyboardType: TextInputType.url,
               autocorrect: false,
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'EnvoyMesh P2P',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            // Connection status indicator
+            Row(
+              children: [
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: envoyState.isConnected
+                        ? Colors.green
+                        : envoyState.connectionStatus == RelayClientState.connecting
+                            ? Colors.orange
+                            : envoyState.connectionStatus == RelayClientState.error
+                                ? Colors.red
+                                : Colors.grey.shade400,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  envoyState.isConnected
+                      ? 'Connected'
+                      : envoyState.connectionStatus == RelayClientState.connecting
+                          ? 'Connecting…'
+                          : envoyState.connectionStatus == RelayClientState.error
+                              ? 'Error${envoyState.error != null ? ': ${envoyState.error}' : ''}'
+                              : 'Disconnected',
+                  style: TextStyle(
+                    color: envoyState.isConnected
+                        ? Colors.green
+                        : envoyState.connectionStatus == RelayClientState.error
+                            ? Colors.red
+                            : null,
+                  ),
+                ),
+              ],
+            ),
+            if (envoyState.initialized) ...[
+              const SizedBox(height: 8),
+              // Peer ID
+              const Text('Peer ID', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              SelectableText(
+                envoyState.peerId ?? '',
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+              const SizedBox(height: 4),
+              // Owner ID
+              const Text('Owner ID', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              SelectableText(
+                envoyState.ownerId ?? '',
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+              ),
+            ],
+            const SizedBox(height: 12),
+            // Home node URL
+            const Text(
+              'Home node WebSocket URL',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 4),
+            TextField(
+              controller: _envoyUrlController,
+              decoration: const InputDecoration(
+                hintText: 'ws://192.168.1.100:3030/ws',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+            ),
+            const SizedBox(height: 8),
+            // Connect / Disconnect button
+            Row(
+              children: [
+                FilledButton(
+                  onPressed: envoyState.connectionStatus == RelayClientState.connecting
+                      ? null
+                      : () async {
+                          final envoy = ref.read(envoyNodeServiceProvider);
+                          if (envoyState.isConnected) {
+                            await envoy.disconnect();
+                            ref.read(envoyMeshProvider.notifier).setDisconnected();
+                          } else {
+                            final url = _envoyUrlController.text.trim();
+                            if (url.isEmpty) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Enter home node WebSocket URL')),
+                                );
+                              }
+                              return;
+                            }
+                            ref.read(envoyMeshProvider.notifier).setConnecting();
+                            try {
+                              if (!envoy.isInitialized) {
+                                await envoy.initialize();
+                                ref.read(envoyMeshProvider.notifier).setInitialized(
+                                  envoy.peerId!,
+                                  envoy.ownerId!,
+                                );
+                              }
+                              await envoy.connect(url);
+                              ref.read(envoyMeshProvider.notifier).setConnected(url);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Connected via EnvoyMesh P2P')),
+                                );
+                              }
+                            } catch (e) {
+                              ref.read(envoyMeshProvider.notifier).setError(e.toString());
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Connect failed: $e')),
+                                );
+                              }
+                            }
+                          }
+                        },
+                  child: Text(
+                    envoyState.isConnected ? 'Disconnect' : 'Connect',
+                  ),
+                ),
+                const SizedBox(width: 12),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => EnvoyPairingScreen(
+                          coreService: widget.coreService,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.qr_code_scanner, size: 18),
+                  label: const Text('Scan QR to pair'),
+                ),
+              ],
             ),
             if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) ...[
               const SizedBox(height: 24),

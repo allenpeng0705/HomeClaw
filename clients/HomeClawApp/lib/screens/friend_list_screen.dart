@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:home_claw_app/l10n/app_localizations.dart';
 import '../core_service.dart';
+import '../envoy/envoy_node_service.dart';
+import '../providers/envoy_providers.dart';
 import '../providers/friend_list_providers.dart';
 import '../widgets/homeclaw_snackbars.dart';
 import '../utils/dev_bridge_friend.dart';
@@ -263,10 +265,67 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
     );
   }
 
+  Widget _buildP2pAgentTile(
+    BuildContext context,
+    EnvoyMeshState envoyState,
+    EnvoyMeshContact bridgeAgent,
+  ) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: theme.colorScheme.primaryContainer,
+          child: Icon(Icons.smart_toy,
+              color: theme.colorScheme.onPrimaryContainer),
+        ),
+        title: Text(bridgeAgent.displayName ?? 'My Agent'),
+        subtitle: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: envoyState.isConnected
+                    ? Colors.green
+                    : Colors.grey.shade400,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              envoyState.isConnected ? 'Connected (P2P)' : 'Disconnected',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ),
+        onTap: () {
+          final sessionUserId = widget.coreService.sessionUserId;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChatScreen(
+                coreService: widget.coreService,
+                userId: sessionUserId ?? bridgeAgent.ownerId,
+                userName: bridgeAgent.displayName ?? 'My Agent',
+                friendId: bridgeAgent.peerId,
+                isP2pPeer: true,
+                p2pRecipientPeerId: bridgeAgent.peerId,
+                p2pRecipientOwnerId: bridgeAgent.ownerId,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Watch the friend list state to rebuild on changes (avoids manual setState for data updates).
     final friendListState = ref.watch(friendListProvider(_friendListKey));
+    final envoyState = ref.watch(envoyMeshProvider);
     if (!widget.coreService.isLoggedIn) {
       return LoginScreen(coreService: widget.coreService);
     }
@@ -285,6 +344,20 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
             ),
             const SizedBox(width: 10),
             Text(l10n.homeClaw),
+            if (envoyState.initialized)
+              Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: envoyState.isConnected
+                        ? Colors.green
+                        : Colors.grey.shade400,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
           ],
         ),
         actions: [
@@ -356,57 +429,78 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
           ),
         ],
       ),
-      body: friendListState.loading
-          ? const Center(child: CircularProgressIndicator())
-          : friendListState.error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(friendListState.error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                        const SizedBox(height: 16),
-                        FilledButton(onPressed: _loadFriends, child: Text(l10n.retry)),
-                      ],
-                    ),
-                  ),
-                )
-              : friendListState.friends.isEmpty
-                  ? Center(child: Text(l10n.noFriends))
-                  : ListView.builder(
-                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                      itemCount: friendListState.friends.length,
-                      itemBuilder: (context, index) {
-                        final f = friendListState.friends[index];
-                        final friendId = f.name.isNotEmpty ? f.name : 'HomeClaw';
-                        final locale = Localizations.localeOf(context);
-                        final displayName = localizedFriendDisplayName(friend: {'name': f.name, 'type': f.type, 'preset': f.preset, 'user_id': f.userId, 'peer_instance_id': f.remoteInstanceId}, locale: locale);
-                        final isUserFriend = f.isPerson;
-                        final toUserId = f.userId;
-                        final peerInst = f.remoteInstanceId;
-                        final hasUnread = isUserFriend && toUserId != null && friendListState.unreadUserIds.contains(toUserId);
-                        final presetForAvatar = f.preset?.isNotEmpty == true
-                            ? f.preset
-                            : _presetKeyFromFriendName(friendId);
-                        final friendPresetForChat = f.preset?.isNotEmpty == true ? f.preset : null;
-                        return _FriendTile(
-                          userId: widget.coreService.sessionUserId!,
-                          friendId: friendId,
-                          displayName: displayName,
-                          coreService: widget.coreService,
-                          preset: presetForAvatar,
-                          friendPreset: friendPresetForChat,
-                          initialMessage: index == 0 ? widget.initialMessage : null,
-                          isUserFriend: isUserFriend,
-                          toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
-                          peerInstanceId: peerInst,
-                          hasUnread: hasUnread,
-                          onRemoved: _loadFriends,
-                          onReturnFromChat: _loadUnreadState,
-                        );
-                      },
-                    ),
+      body: Builder(builder: (context) {
+        // Build display list: prepend P2P bridge agent if available.
+        final displayFriends = <FriendEntry>[];
+        final bridge = envoyState.bridgeAgentContact;
+        if (bridge != null) {
+          displayFriends.add(FriendEntry(
+            id: 'p2p_agent_${bridge.peerId}',
+            name: bridge.displayName ?? 'My Agent',
+            type: 'p2p_agent',
+            userId: bridge.ownerId,
+          ));
+        }
+        displayFriends.addAll(friendListState.friends);
+
+        if (friendListState.loading) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (friendListState.error != null) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(friendListState.error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  const SizedBox(height: 16),
+                  FilledButton(onPressed: _loadFriends, child: Text(l10n.retry)),
+                ],
+              ),
+            ),
+          );
+        }
+        if (displayFriends.isEmpty) {
+          return Center(child: Text(l10n.noFriends));
+        }
+        return ListView.builder(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          itemCount: displayFriends.length,
+          itemBuilder: (context, index) {
+            final f = displayFriends[index];
+            if (f.type == 'p2p_agent') {
+              return _buildP2pAgentTile(context, envoyState, bridge!);
+            }
+            final friendId = f.name.isNotEmpty ? f.name : 'HomeClaw';
+            final locale = Localizations.localeOf(context);
+            final displayName = localizedFriendDisplayName(friend: {'name': f.name, 'type': f.type, 'preset': f.preset, 'user_id': f.userId, 'peer_instance_id': f.remoteInstanceId}, locale: locale);
+            final isUserFriend = f.isPerson;
+            final toUserId = f.userId;
+            final peerInst = f.remoteInstanceId;
+            final hasUnread = isUserFriend && toUserId != null && friendListState.unreadUserIds.contains(toUserId);
+            final presetForAvatar = f.preset?.isNotEmpty == true
+                ? f.preset
+                : _presetKeyFromFriendName(friendId);
+            final friendPresetForChat = f.preset?.isNotEmpty == true ? f.preset : null;
+            return _FriendTile(
+              userId: widget.coreService.sessionUserId!,
+              friendId: friendId,
+              displayName: displayName,
+              coreService: widget.coreService,
+              preset: presetForAvatar,
+              friendPreset: friendPresetForChat,
+              initialMessage: index == 0 ? widget.initialMessage : null,
+              isUserFriend: isUserFriend,
+              toUserId: toUserId?.isNotEmpty == true ? toUserId : null,
+              peerInstanceId: peerInst,
+              hasUnread: hasUnread,
+              onRemoved: _loadFriends,
+              onReturnFromChat: _loadUnreadState,
+            );
+          },
+        );
+      }),
     );
   }
 }

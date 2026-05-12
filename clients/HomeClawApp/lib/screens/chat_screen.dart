@@ -36,6 +36,8 @@ import 'finder_files_tab.dart';
 import 'reminders_tab.dart';
 import 'settings_screen.dart';
 import 'vmprint_preview_screen.dart';
+import '../envoy/envoy_node_service.dart';
+import '../providers/envoy_providers.dart';
 import '../utils/dev_bridge_friend.dart';
 import '../utils/product_preset_chat.dart';
 import '../mixins/chat_voice_handler.dart';
@@ -88,6 +90,15 @@ class ChatScreen extends ConsumerStatefulWidget {
   /// Core preset key for this AI friend (e.g. `cursor`, `claudecode`, `clawcode`) from GET /api/me/friends.
   final String? friendPreset;
 
+  /// True when chatting with a P2P peer via EnvoyMesh (not HTTP/CoreService).
+  final bool isP2pPeer;
+
+  /// The recipient's P2P peer ID (used with [isP2pPeer]).
+  final String? p2pRecipientPeerId;
+
+  /// The recipient's owner ID (used for ChatHistoryStore key with [isP2pPeer]).
+  final String? p2pRecipientOwnerId;
+
   /// Resolved product preset (reminder / finder / knowledge) for quick actions; null if unknown.
   String? get resolvedProductPresetKey =>
       resolveProductPresetKey(preset: friendPreset, friendName: friendId);
@@ -103,6 +114,9 @@ class ChatScreen extends ConsumerStatefulWidget {
     this.toUserId,
     this.remotePeerInstanceId,
     this.friendPreset,
+    this.isP2pPeer = false,
+    this.p2pRecipientPeerId,
+    this.p2pRecipientOwnerId,
   });
 
   @override
@@ -185,6 +199,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   /// Bumps on each inbox fetch so stale async applies cannot overwrite newer UI.
   int _userInboxFetchGeneration = 0;
   StreamSubscription<Map<String, dynamic>>? _pushMessageSubscription;
+  StreamSubscription<EnvoyMeshChatMessage>? _p2pMessageSubscription;
 
   int? _activeUserSendBubbleIndex;
   String? _activeUserSendStage;
@@ -650,6 +665,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       _userInboxPollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
         if (mounted && widget.isUserFriend && widget.toUserId != null)
           _loadUserInbox(fromPoll: true);
+      });
+    } else if (widget.isP2pPeer) {
+      _loadChatHistory();
+      final envoy = ref.read(envoyNodeServiceProvider);
+      _p2pMessageSubscription = envoy.onChatMessage.listen((msg) {
+        if (!mounted) return;
+        if (msg.senderPeerId != widget.p2pRecipientPeerId) return;
+        setState(() {
+          _messages.add(MapEntry(msg.text, false));
+          _messageImages.add(null);
+          _messageAudios.add(null);
+          _messageVideos.add(null);
+          _messageFileLabels.add(null);
+          _messageFileRefs.add(null);
+        });
+        _scrollToBottom();
       });
     } else {
       unawaited(_bootstrapAiChatScreen());
@@ -1700,6 +1731,50 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       await _persistChatHistory();
       if (!mounted) {
         _stopLoadingStatusTimer();
+        return;
+      }
+      // P2P EnvoyMesh: send via EnvoyNodeService (text-only).
+      if (widget.isP2pPeer && mounted) {
+        try {
+          final envoy = ref.read(envoyNodeServiceProvider);
+          final peerId = widget.p2pRecipientPeerId!;
+          if (widget.p2pRecipientOwnerId != null &&
+              widget.p2pRecipientOwnerId!.isNotEmpty) {
+            await envoy.sendChatToOwner(
+                peerId, widget.p2pRecipientOwnerId!, textForModel);
+          } else {
+            await envoy.sendChat(peerId, textForModel);
+          }
+          if (mounted) {
+            _stopLoadingStatusTimer();
+            setState(() => _loading = false);
+            _scrollToBottom(force: true);
+          }
+        } catch (e) {
+          if (mounted) {
+            _stopLoadingStatusTimer();
+            setState(() {
+              if (optimisticIndex != null &&
+                  optimisticIndex! >= 0 &&
+                  optimisticIndex! < _messages.length) {
+                _messages.removeAt(optimisticIndex!);
+                _messageImages.removeAt(optimisticIndex!);
+                _messageAudios.removeAt(optimisticIndex!);
+                _messageVideos.removeAt(optimisticIndex!);
+                _messageFileLabels.removeAt(optimisticIndex!);
+                _messageFileRefs.removeAt(optimisticIndex!);
+              }
+              _messages.add(MapEntry('Error: $e', false));
+              _messageImages.add(null);
+              _messageAudios.add(null);
+              _messageVideos.add(null);
+              _messageFileLabels.add(null);
+              _messageFileRefs.add(null);
+              _loading = false;
+            });
+            _scrollToBottom(force: true);
+          }
+        }
         return;
       }
       // User-to-user: send via POST /api/user-message; no AI reply.
@@ -3616,6 +3691,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     _userInboxApplyDebounceTimer?.cancel();
     _loadingStatusTimer?.cancel();
     _pushMessageSubscription?.cancel();
+    _p2pMessageSubscription?.cancel();
     voiceDispose();
     _inputController.dispose();
     _scrollController.removeListener(_onScrollForPagination);

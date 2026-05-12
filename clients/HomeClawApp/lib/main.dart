@@ -10,6 +10,8 @@ import 'package:home_claw_app/l10n/app_localizations.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
 import 'chat_history_store.dart';
 import 'core_service.dart';
+import 'envoy/envoy_node_service.dart';
+import 'providers/envoy_providers.dart';
 import 'providers/providers.dart';
 import 'screens/clawcode_screen.dart';
 import 'screens/friend_list_screen.dart';
@@ -46,6 +48,17 @@ void main() async {
     await coreService.loadSettings();
   } catch (_) {
     // Settings load failed; app uses defaults.
+  }
+  // Initialize EnvoyMesh P2P layer (addon — app works without it).
+  final envoyService = EnvoyNodeService();
+  try {
+    await envoyService.initialize();
+    final savedUrl = await envoyService.getSavedHomeNodeUrl();
+    if (savedUrl != null && savedUrl.isNotEmpty) {
+      unawaited(envoyService.connect(savedUrl));
+    }
+  } catch (_) {
+    // EnvoyMesh P2P init failed; app continues without P2P.
   }
   // Register push token with Core when we have a session user (done per-chat in ChatScreen).
   if (coreService.isLoggedIn) {
@@ -149,6 +162,7 @@ void main() async {
     ProviderScope(
       overrides: [
         coreServiceProvider.overrideWithValue(coreService),
+        envoyNodeServiceProvider.overrideWithValue(envoyService),
       ],
       child: HomeClawCompanionApp(
         coreService: coreService,

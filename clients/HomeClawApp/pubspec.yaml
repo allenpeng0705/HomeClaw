@@ -42,6 +42,7 @@ dependencies:
   record: ^6.0.0   # 6.x uses record_linux 1.x compatible with record_platform_interface (fixes iOS build)
   video_player: ^2.9.2
   cryptography: ^2.9.0
+  crypto: ^3.0.3
   flutter_secure_storage: ^10.0.0
   image: ^4.3.0
   flutter_riverpod: ^2.6.1  # State management (non-breaking addition)
