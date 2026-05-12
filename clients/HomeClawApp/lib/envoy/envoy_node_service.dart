@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -97,6 +98,7 @@ class EnvoyNodeService {
   static const _keyOwnerId = 'envoy_owner_id';
   static const _keyHomeNodeUrl = 'envoy_home_node_url';
   static const _keyPrivateKeyPem = 'envoy_private_key_pem';
+  static const _keyPairedNodeInfo = 'envoy_paired_node_info';
 
   // ---- Loaded identity ----
   String? _peerId;
@@ -262,6 +264,67 @@ class EnvoyNodeService {
   Future<String?> getSavedHomeNodeUrl() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_keyHomeNodeUrl);
+  }
+
+  // ============================================
+  // Pairing (Phase 10A.6)
+  // ============================================
+
+  /// Save the paired node info from a scanned QR code.
+  ///
+  /// Persists to SharedPreferences so the bridge agent is remembered
+  /// across app restarts.
+  Future<void> savePairedNodeInfo(PairingPayload payload) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyPairedNodeInfo, jsonEncode({
+      'wsUrl': payload.wsUrl,
+      if (payload.relayPeerId != null) 'relayPeerId': payload.relayPeerId,
+      if (payload.agentPeerId != null) 'agentPeerId': payload.agentPeerId,
+      if (payload.agentPubKey != null) 'agentPubKey': payload.agentPubKey,
+      if (payload.token != null) 'token': payload.token,
+    }));
+  }
+
+  /// Load the paired node info from storage, if any.
+  Future<PairingPayload?> getPairedNodeInfo() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_keyPairedNodeInfo);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      final wsUrl = map['wsUrl'] as String?;
+      if (wsUrl == null || wsUrl.isEmpty) return null;
+      return PairingPayload(
+        wsUrl: wsUrl,
+        relayPeerId: map['relayPeerId'] as String?,
+        agentPeerId: map['agentPeerId'] as String?,
+        agentPubKey: map['agentPubKey'] as String?,
+        token: map['token'] as String?,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Send a device.pair.request to the bridge agent after scanning the
+  /// pairing QR code.
+  ///
+  /// Must be connected. [agentPeerId] comes from the QR's `agentPeerId`
+  /// field. The request includes our peer ID, owner ID, and public key
+  /// so the home node can verify we're the same owner's device.
+  Future<String> sendDevicePairRequest(
+    String agentPeerId, {
+    String? note,
+    String? pairingToken,
+  }) async {
+    _requireConnected();
+    return _client!.sendDevicePairRequest(
+      recipientPeerId: agentPeerId,
+      requesterOwnerId: _ownerId!,
+      requesterDeviceId: _peerId!,
+      requesterDevicePublicKeyPem: _publicKeyPem!,
+      note: note,
+    );
   }
 
   // ============================================

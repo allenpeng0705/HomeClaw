@@ -1173,6 +1173,174 @@ RelayHintsResponsePayload parseRelayHintsResponsePayload(dynamic input) {
 }
 
 // ============================================
+// device.pair.request payload
+// ============================================
+
+/// Payload for `device.pair.request` (Phase 10A.6 pairing flow).
+class DevicePairRequestPayload {
+  final String requestId;
+  final String requesterOwnerId;
+  final String requesterDeviceId;
+  final String requesterDevicePublicKeyPem;
+  final String? note;
+  final String createdAt;
+
+  const DevicePairRequestPayload({
+    required this.requestId,
+    required this.requesterOwnerId,
+    required this.requesterDeviceId,
+    required this.requesterDevicePublicKeyPem,
+    this.note,
+    required this.createdAt,
+  });
+
+  factory DevicePairRequestPayload.fromJson(Map<String, dynamic> json) {
+    final requestId = json['requestId'];
+    final requesterOwnerId = json['requesterOwnerId'];
+    final requesterDeviceId = json['requesterDeviceId'];
+    final requesterDevicePublicKeyPem = json['requesterDevicePublicKeyPem'];
+    final note = json['note'];
+    final createdAt = json['createdAt'];
+
+    if (requestId is! String || requestId.isEmpty) {
+      throw FormatException('requestId must be a non-empty string');
+    }
+    if (requesterOwnerId is! String || requesterOwnerId.isEmpty) {
+      throw FormatException('requesterOwnerId must be a non-empty string');
+    }
+    if (requesterDeviceId is! String || requesterDeviceId.isEmpty) {
+      throw FormatException('requesterDeviceId must be a non-empty string');
+    }
+    if (requesterDevicePublicKeyPem is! String ||
+        requesterDevicePublicKeyPem.isEmpty) {
+      throw FormatException(
+          'requesterDevicePublicKeyPem must be a non-empty string');
+    }
+    if (createdAt is! String || createdAt.isEmpty) {
+      throw FormatException('createdAt must be a non-empty string');
+    }
+
+    return DevicePairRequestPayload(
+      requestId: requestId,
+      requesterOwnerId: requesterOwnerId,
+      requesterDeviceId: requesterDeviceId,
+      requesterDevicePublicKeyPem: requesterDevicePublicKeyPem,
+      note: note is String && note.isNotEmpty ? note : null,
+      createdAt: createdAt,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    final map = <String, dynamic>{
+      'requestId': requestId,
+      'requesterOwnerId': requesterOwnerId,
+      'requesterDeviceId': requesterDeviceId,
+      'requesterDevicePublicKeyPem': requesterDevicePublicKeyPem,
+      'createdAt': createdAt,
+      'requestedDeviceProfile': 'satellite',
+      'requestedCapabilities': ['ui.channel', 'message.send'],
+    };
+    if (note != null && note!.isNotEmpty) {
+      map['note'] = note;
+    }
+    return map;
+  }
+}
+
+/// Creates a [DevicePairRequestPayload] with defaults.
+DevicePairRequestPayload createDevicePairRequestPayload({
+  required String requesterOwnerId,
+  required String requesterDeviceId,
+  required String requesterDevicePublicKeyPem,
+  String? note,
+  String? requestId,
+  String? createdAt,
+}) {
+  return DevicePairRequestPayload(
+    requestId: requestId ?? const Uuid().v4(),
+    requesterOwnerId: requesterOwnerId,
+    requesterDeviceId: requesterDeviceId,
+    requesterDevicePublicKeyPem: requesterDevicePublicKeyPem,
+    note: note,
+    createdAt: createdAt ?? DateTime.now().toUtc().toIso8601String(),
+  );
+}
+
+/// Parses a `device.pair.request` payload.
+DevicePairRequestPayload parseDevicePairRequestPayload(dynamic input) {
+  if (input is! Map<String, dynamic>) {
+    throw FormatException(
+        'device.pair.request payload must be a JSON object');
+  }
+  return DevicePairRequestPayload.fromJson(input);
+}
+
+// ============================================
+// Pairing QR payload (Phase 10A.6)
+// ============================================
+
+/// URI-friendly pairing data encoded in QR codes for mobile pairing.
+///
+/// The desktop/home node displays a QR with this data. The mobile app scans
+/// it and uses the fields to connect and send a device pair request.
+///
+/// URI format: `envoy://pair?wsUrl=...&relayPeerId=...&agentPeerId=...`
+class PairingPayload {
+  final String wsUrl;
+  final String? relayPeerId;
+  final String? agentPeerId;
+  final String? agentPubKey;
+  final String? token;
+
+  const PairingPayload({
+    required this.wsUrl,
+    this.relayPeerId,
+    this.agentPeerId,
+    this.agentPubKey,
+    this.token,
+  });
+
+  /// Encode to a `envoy://pair?...` URI for QR display.
+  String toUri() {
+    final params = <String, String>{'wsUrl': wsUrl};
+    if (relayPeerId != null && relayPeerId!.isNotEmpty) {
+      params['relayPeerId'] = relayPeerId!;
+    }
+    if (agentPeerId != null && agentPeerId!.isNotEmpty) {
+      params['agentPeerId'] = agentPeerId!;
+    }
+    if (agentPubKey != null && agentPubKey!.isNotEmpty) {
+      params['agentPubKey'] = Uri.encodeComponent(agentPubKey!);
+    }
+    if (token != null && token!.isNotEmpty) {
+      params['token'] = token!;
+    }
+    return Uri(queryParameters: params).toString().replaceFirst('?', 'envoy://pair?');
+  }
+
+  /// Decode from a scanned QR URI.
+  ///
+  /// Returns null if the URI scheme/host is not `envoy://pair` or if
+  /// the required `wsUrl` parameter is missing.
+  static PairingPayload? fromUri(Uri uri) {
+    if (uri.scheme != 'envoy' || uri.host != 'pair') return null;
+    final wsUrl = uri.queryParameters['wsUrl']?.trim();
+    if (wsUrl == null || wsUrl.isEmpty) return null;
+    return PairingPayload(
+      wsUrl: wsUrl,
+      relayPeerId: uri.queryParameters['relayPeerId']?.trim(),
+      agentPeerId: uri.queryParameters['agentPeerId']?.trim(),
+      agentPubKey: uri.queryParameters['agentPubKey']?.trim(),
+      token: uri.queryParameters['token']?.trim(),
+    );
+  }
+
+  @override
+  String toString() =>
+      'PairingPayload(wsUrl: $wsUrl, agentPeerId: $agentPeerId)';
+}
+
+// ============================================
 // Signing helpers
 // ============================================
 

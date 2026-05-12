@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
+import '../envoy/envoy_node_service.dart';
 import '../envoy/relay_client.dart';
 import '../providers/envoy_providers.dart';
 import '../providers/settings_providers.dart';
@@ -591,6 +592,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               }
                               await envoy.connect(url);
                               ref.read(envoyMeshProvider.notifier).setConnected(url);
+                              // Auto-discover bridge agent after connection
+                              try {
+                                final bridge = await envoy.discoverBridgeAgent();
+                                final bonds = await envoy.getBonds();
+                                final contacts = <EnvoyMeshContact>[];
+                                if (bridge != null) contacts.add(bridge);
+                                contacts.addAll(bonds);
+                                ref.read(envoyMeshProvider.notifier).setContacts(contacts);
+                              } catch (_) {}
                               if (mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(content: Text('Connected via EnvoyMesh P2P')),

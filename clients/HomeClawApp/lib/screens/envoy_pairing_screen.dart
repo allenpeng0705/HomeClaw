@@ -3,10 +3,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../core_service.dart';
+import '../envoy/envoy_protocol.dart';
 import '../providers/envoy_providers.dart';
 
-/// Scan a QR code from the EnvoyMesh home node (`envoy://pair?wsUrl=ws://...`)
-/// and connect the app as a P2P peer.
+/// Scan a QR code from the EnvoyMesh home node and pair the app as a P2P peer.
+///
+/// The QR contains a [PairingPayload] encoded as:
+///   `envoy://pair?wsUrl=...&relayPeerId=...&agentPeerId=...&agentPubKey=...&token=...`
+///
+/// Pairing flow:
+/// 1. Scan QR → decode [PairingPayload]
+/// 2. Connect to relay via [EnvoyNodeService.connect]
+/// 3. Send [EnvoyIntent.devicePairRequest] to bridge agent (if `agentPeerId` present)
+/// 4. Persist paired info so the bridge agent appears after app restart
 class EnvoyPairingScreen extends ConsumerStatefulWidget {
   final CoreService coreService;
 
@@ -22,48 +31,66 @@ class EnvoyPairingScreen extends ConsumerStatefulWidget {
 
 class _EnvoyPairingScreenState extends ConsumerState<EnvoyPairingScreen> {
   bool _scanned = false;
-  bool _connecting = false;
+  bool _pairing = false;
+  String _statusText = '';
 
   Future<void> _onDetect(BarcodeCapture capture) async {
-    if (_scanned || _connecting) return;
+    if (_scanned || _pairing) return;
     final list = capture.barcodes;
     if (list.isEmpty) return;
     final code = list.first.rawValue;
     if (code == null || code.isEmpty) return;
     final uri = Uri.tryParse(code);
     if (uri == null) return;
-    // Support envoy://pair?wsUrl=... and homeclaw://envoy-pair?wsUrl=...
-    final isEnvoyPair = (uri.scheme == 'envoy' && uri.host == 'pair') ||
-        (uri.scheme == 'homeclaw' && uri.host == 'envoy-pair');
-    if (!isEnvoyPair) return;
 
-    setState(() => _scanned = true);
-    final wsUrl = uri.queryParameters['wsUrl']?.trim();
-    if (wsUrl == null || wsUrl.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid QR: missing wsUrl')),
-        );
-        Navigator.of(context).maybePop();
-      }
-      return;
-    }
+    // Decode pairing payload
+    final payload = PairingPayload.fromUri(uri);
+    if (payload == null) return;
 
-    setState(() => _connecting = true);
+    setState(() {
+      _scanned = true;
+      _pairing = true;
+      _statusText = 'Connecting to home node…';
+    });
+
     try {
       final envoy = ref.read(envoyNodeServiceProvider);
+      final notifier = ref.read(envoyMeshProvider.notifier);
+
+      // Ensure identity is loaded
       if (!envoy.isInitialized) {
         await envoy.initialize();
-        ref.read(envoyMeshProvider.notifier).setInitialized(
-          envoy.peerId!,
-          envoy.ownerId!,
-        );
+        notifier.setInitialized(envoy.peerId!, envoy.ownerId!);
       }
-      await envoy.connect(wsUrl);
-      ref.read(envoyMeshProvider.notifier).setConnected(wsUrl);
+
+      // Connect to relay
+      await envoy.connect(payload.wsUrl);
+      notifier.setConnected(payload.wsUrl);
+
+      // Send device pair request to bridge agent if present
+      if (payload.agentPeerId != null && payload.agentPeerId!.isNotEmpty) {
+        if (mounted) setState(() => _statusText = 'Sending pair request…');
+
+        try {
+          await envoy.sendDevicePairRequest(
+            payload.agentPeerId!,
+            note: 'HomeClaw Companion app pairing',
+          );
+        } catch (_) {
+          // Pair request is best-effort; the node may auto-accept on connect
+        }
+      }
+
+      // Persist paired info
+      await envoy.savePairedNodeInfo(payload);
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Connected via EnvoyMesh P2P')),
+          SnackBar(
+            content: Text(payload.agentPeerId != null
+                ? 'Paired! Bridge agent available in friend list.'
+                : 'Connected via EnvoyMesh P2P'),
+          ),
         );
         Navigator.of(context).maybePop();
       }
@@ -75,7 +102,8 @@ class _EnvoyPairingScreenState extends ConsumerState<EnvoyPairingScreen> {
         );
         setState(() {
           _scanned = false;
-          _connecting = false;
+          _pairing = false;
+          _statusText = '';
         });
       }
     }
@@ -87,14 +115,14 @@ class _EnvoyPairingScreenState extends ConsumerState<EnvoyPairingScreen> {
       appBar: AppBar(
         title: const Text('Scan EnvoyMesh QR'),
       ),
-      body: _connecting
-          ? const Center(
+      body: _pairing
+          ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Connecting to home node…'),
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(_statusText),
                 ],
               ),
             )

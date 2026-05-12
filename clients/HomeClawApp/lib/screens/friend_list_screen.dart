@@ -8,6 +8,7 @@ import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:home_claw_app/l10n/app_localizations.dart';
 import '../core_service.dart';
 import '../envoy/envoy_node_service.dart';
+import '../envoy/relay_client.dart';
 import '../providers/envoy_providers.dart';
 import '../providers/friend_list_providers.dart';
 import '../widgets/homeclaw_snackbars.dart';
@@ -101,6 +102,7 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
       if (!mounted) return;
       _loadFriends();
       _loadMyAvatar();
+      _discoverBridgeAgentIfNeeded();
     });
     _pushSubscription = widget.coreService.pushMessageStream.listen((push) {
       final source = (push['source'] as String?)?.trim();
@@ -154,6 +156,30 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
         }
       }
       if (mounted) _friendListNotifier.setUnreadUserIds(unread);
+    } catch (_) {}
+  }
+
+  /// If EnvoyMesh is connected but no bridge agent has been discovered yet,
+  /// auto-discover so the P2P contact appears in the friend list (e.g. after
+  /// auto-reconnect on app restart).
+  void _discoverBridgeAgentIfNeeded() {
+    try {
+      final envoy = ref.read(envoyNodeServiceProvider);
+      if (!envoy.isInitialized || envoy.connectionState != RelayClientState.connected) return;
+      final envoyState = ref.read(envoyMeshProvider);
+      if (envoyState.bridgeAgentContact != null) return; // already discovered
+      unawaited(() async {
+        try {
+          final bridge = await envoy.discoverBridgeAgent();
+          final bonds = await envoy.getBonds();
+          final contacts = <EnvoyMeshContact>[];
+          if (bridge != null) contacts.add(bridge);
+          contacts.addAll(bonds);
+          if (mounted) {
+            ref.read(envoyMeshProvider.notifier).setContacts(contacts);
+          }
+        } catch (_) {}
+      }());
     } catch (_) {}
   }
 

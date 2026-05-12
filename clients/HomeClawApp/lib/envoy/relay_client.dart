@@ -276,4 +276,41 @@ class RelayClient {
     if (bonds == null) return [];
     return bonds.cast<Map<String, dynamic>>();
   }
+
+  /// Build, sign, and send a device.pair.request envelope through the relay.
+  ///
+  /// Used by the mobile app after scanning the pairing QR code to request
+  /// pairing with the bridge agent on the home node.
+  Future<String> sendDevicePairRequest({
+    required String recipientPeerId,
+    required String requesterOwnerId,
+    required String requesterDeviceId,
+    required String requesterDevicePublicKeyPem,
+    String? note,
+  }) async {
+    final payload = createDevicePairRequestPayload(
+      requesterOwnerId: requesterOwnerId,
+      requesterDeviceId: requesterDeviceId,
+      requesterDevicePublicKeyPem: requesterDevicePublicKeyPem,
+      note: note,
+    );
+
+    final unsigned = createUnsignedEnvelope(CreateEnvelopeInput(
+      senderPeerId: peerId,
+      senderPublicKey: publicKeyPem,
+      intent: EnvoyIntent.devicePairRequest,
+      recipientPeerId: recipientPeerId,
+      payload: payload.toJson(),
+    ));
+
+    final signature = await signCanonicalPayload(
+      unsigned.toJson(),
+      privateKeyPem,
+      publicKeyPem,
+    );
+
+    final signed = unsigned.sign(signature);
+    await forwardEnvelope(signed);
+    return signed.messageId;
+  }
 }
