@@ -1,0 +1,21 @@
+# EnvoyMesh bridge channel: receives P2P messages from EnvoyMesh Node,
+# forwards to HomeClaw Core, and sends replies back via the bridge.
+name: envoymesh
+host: 0.0.0.0
+port: 8010
+endpoints:
+  - path: /message
+    method: POST
+    description: Receive P2P chat from EnvoyMesh bridge and return Core reply
+    capabilities: []
+    input: {"from": "string", "fromOwnerId": "string", "fromName": "string", "text": "string"}
+    output: {"text": "string"}
+  - path: /status
+    method: GET
+    description: Health check
+    input: {}
+    output: {"status": "OK", "bridge_url": "string"}
+# Bridge callback URL — where this channel sends Core replies back to
+bridge_url: http://127.0.0.1:3031/bridge/send
+# Optional shared secret — must match EnvoyMesh bridge's secret
+bridge_secret: ""

@@ -43,6 +43,7 @@ CHANNELS = [
     "feishu",
     "dingtalk",
     "bluebubbles",
+    "envoymesh",
 ]
 
 
