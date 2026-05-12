@@ -45,6 +45,7 @@ _cfg = _load_config()
 BRIDGE_URL = os.getenv("ENVOYMESH_BRIDGE_URL", _cfg.get("bridge_url", "http://127.0.0.1:3031/bridge/send"))
 BRIDGE_SECRET = os.getenv("ENVOYMESH_BRIDGE_SECRET", _cfg.get("bridge_secret", ""))
 CHANNEL_NAME = os.getenv("ENVOYMESH_CHANNEL_NAME", _cfg.get("name", "envoymesh"))
+HC_USER_ID = os.getenv("ENVOYMESH_USER_ID", _cfg.get("user_id", "AllenPeng"))
 
 
 def core_url() -> str:
@@ -95,8 +96,11 @@ async def message(req: Request):
         )
 
     # ── 1. Build inbound payload for Core ───────────────────────────────
+    # user_id = configured HomeClaw user (matches user.yml id)
+    # friend_id = P2P sender identity (so Core knows who it's talking to)
     payload: dict = {
-        "user_id": sender_owner_id,
+        "user_id": HC_USER_ID,
+        "friend_id": sender_owner_id,
         "text": text,
         "channel_name": CHANNEL_NAME,
         "user_name": sender_name,
@@ -106,7 +110,7 @@ async def message(req: Request):
     }
 
     # ── 2. Check for Claw-Code commands ─────────────────────────────────
-    _cc = apply_clawcode_inbound_flow(sender_owner_id, text, payload)
+    _cc = apply_clawcode_inbound_flow(HC_USER_ID, text, payload)
     if _cc is not None:
         await _reply_to_bridge(sender_peer_id, _cc)
         return {"text": _cc, "status": "clawcode"}

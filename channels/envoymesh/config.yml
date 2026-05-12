@@ -15,6 +15,10 @@ endpoints:
     description: Health check
     input: {}
     output: {"status": "OK", "bridge_url": "string"}
+# HomeClaw user ID (must match an id in config/user.yml)
+# The bridge routes all incoming P2P messages through this user's Core session.
+# Each sender appears as a friend in the conversation context.
+user_id: AllenPeng
 # Bridge callback URL — where this channel sends Core replies back to
 bridge_url: http://127.0.0.1:3031/bridge/send
 # Optional shared secret — must match EnvoyMesh bridge's secret
