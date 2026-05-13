@@ -6,6 +6,9 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'envoy_identity.dart';
 import 'envoy_protocol.dart';
 
+/// Max time to wait for the WebSocket handshake to complete.
+const Duration kRelayConnectTimeout = Duration(seconds: 10);
+
 /// Base delay in ms for [RelayClient] reconnect backoff.
 const int kRelayReconnectBaseMs = 500;
 
@@ -113,7 +116,7 @@ class RelayClient {
     try {
       final uri = Uri.parse(url);
       _channel = WebSocketChannel.connect(uri);
-      await _channel!.ready;
+      await _channel!.ready.timeout(kRelayConnectTimeout);
 
       _setState(RelayClientState.connected);
       _reconnectAttempts = 0;

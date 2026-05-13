@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
+import '../envoy/relay_client.dart';
 import '../providers/envoy_providers.dart';
 import '../providers/settings_providers.dart';
 import 'change_password_screen.dart';

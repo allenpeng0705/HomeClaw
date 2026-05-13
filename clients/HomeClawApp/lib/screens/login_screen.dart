@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core_service.dart';
 import '../providers/login_providers.dart';
 import '../widgets/homeclaw_snackbars.dart';
+import 'envoy_pairing_screen.dart';
 import 'friend_list_screen.dart';
 
 /// Login screen: Core URL, API key (persistent), username picklist, password.
@@ -183,6 +184,37 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Text(
+              'Pair with EnvoyMesh before signing in:',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Scan the QR from Social → Settings → Node on your home computer. '
+              'This saves the WebSocket URL and optional bridge agent so P2P is ready after you log in.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () async {
+                await Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (context) => EnvoyPairingScreen(
+                      coreService: widget.coreService,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text('Scan EnvoyMesh pairing QR'),
+            ),
+            const SizedBox(height: 28),
+            const Divider(height: 1),
+            const SizedBox(height: 24),
             const Text('User', style: TextStyle(fontWeight: FontWeight.w500)),
             const SizedBox(height: 8),
             if (state.loadingUsers)
