@@ -1184,6 +1184,7 @@ class DevicePairRequestPayload {
   final String requesterDevicePublicKeyPem;
   final String? note;
   final String createdAt;
+  final String? pairingToken;
 
   const DevicePairRequestPayload({
     required this.requestId,
@@ -1192,6 +1193,7 @@ class DevicePairRequestPayload {
     required this.requesterDevicePublicKeyPem,
     this.note,
     required this.createdAt,
+    this.pairingToken,
   });
 
   factory DevicePairRequestPayload.fromJson(Map<String, dynamic> json) {
@@ -1201,6 +1203,7 @@ class DevicePairRequestPayload {
     final requesterDevicePublicKeyPem = json['requesterDevicePublicKeyPem'];
     final note = json['note'];
     final createdAt = json['createdAt'];
+    final pairingToken = json['pairingToken'];
 
     if (requestId is! String || requestId.isEmpty) {
       throw FormatException('requestId must be a non-empty string');
@@ -1227,6 +1230,7 @@ class DevicePairRequestPayload {
       requesterDevicePublicKeyPem: requesterDevicePublicKeyPem,
       note: note is String && note.isNotEmpty ? note : null,
       createdAt: createdAt,
+      pairingToken: pairingToken is String && pairingToken.isNotEmpty ? pairingToken : null,
     );
   }
 
@@ -1243,6 +1247,9 @@ class DevicePairRequestPayload {
     if (note != null && note!.isNotEmpty) {
       map['note'] = note;
     }
+    if (pairingToken != null && pairingToken!.isNotEmpty) {
+      map['pairingToken'] = pairingToken;
+    }
     return map;
   }
 }
@@ -1255,6 +1262,7 @@ DevicePairRequestPayload createDevicePairRequestPayload({
   String? note,
   String? requestId,
   String? createdAt,
+  String? pairingToken,
 }) {
   return DevicePairRequestPayload(
     requestId: requestId ?? const Uuid().v4(),
@@ -1263,6 +1271,7 @@ DevicePairRequestPayload createDevicePairRequestPayload({
     requesterDevicePublicKeyPem: requesterDevicePublicKeyPem,
     note: note,
     createdAt: createdAt ?? DateTime.now().toUtc().toIso8601String(),
+    pairingToken: pairingToken,
   );
 }
 

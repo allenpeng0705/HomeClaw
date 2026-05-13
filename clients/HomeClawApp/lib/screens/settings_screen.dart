@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,8 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import '../chat_history_store.dart';
 import '../core_service.dart';
-import '../envoy/envoy_node_service.dart';
-import '../envoy/relay_client.dart';
 import '../providers/envoy_providers.dart';
 import '../providers/settings_providers.dart';
 import 'change_password_screen.dart';
@@ -33,6 +32,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late TextEditingController _execCommandController;
   late TextEditingController _envoyUrlController;
   late final SettingsNotifier _settingsNotifier;
+  /// Non-null after [_loadEnvoyP2pFields] when a QR pairing payload was saved.
+  String? _envoyPairedHint;
 
   @override
   void initState() {
@@ -46,6 +47,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _execCommandController = TextEditingController();
     _envoyUrlController = TextEditingController(text: 'ws://192.168.1.100:3030/ws');
     if (widget.coreService.isLoggedIn) _loadMyAvatar();
+    unawaited(_loadEnvoyP2pFields());
+  }
+
+  Future<void> _loadEnvoyP2pFields() async {
+    final envoy = ref.read(envoyNodeServiceProvider);
+    try {
+      if (!envoy.isInitialized) await envoy.initialize();
+      final paired = await envoy.getPairedNodeInfo();
+      final savedUrl = await envoy.getSavedHomeNodeUrl();
+      if (!mounted) return;
+      setState(() {
+        if (savedUrl != null && savedUrl.trim().isNotEmpty) {
+          _envoyUrlController.text = savedUrl.trim();
+        }
+        _envoyPairedHint = paired != null
+            ? 'QR pairing saved · reconnect uses stored home node URL'
+            : null;
+      });
+    } catch (_) {}
   }
 
   Future<void> _loadMyAvatar() async {
@@ -526,6 +546,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
               ],
             ),
+            if (_envoyPairedHint != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _envoyPairedHint!,
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+            ],
             if (envoyState.initialized) ...[
               const SizedBox(height: 8),
               // Peer ID
@@ -621,13 +648,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const SizedBox(width: 12),
                 OutlinedButton.icon(
                   onPressed: () {
-                    Navigator.of(context).push(
+                    Navigator.of(context)
+                        .push(
                       MaterialPageRoute(
                         builder: (context) => EnvoyPairingScreen(
                           coreService: widget.coreService,
                         ),
                       ),
-                    );
+                    )
+                        .then((_) {
+                      if (mounted) unawaited(_loadEnvoyP2pFields());
+                    });
                   },
                   icon: const Icon(Icons.qr_code_scanner, size: 18),
                   label: const Text('Scan QR to pair'),

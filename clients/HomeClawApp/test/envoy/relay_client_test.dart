@@ -6,6 +6,18 @@ import 'package:home_claw_app/envoy/envoy_protocol.dart';
 import 'package:home_claw_app/envoy/relay_client.dart';
 
 void main() {
+  group('relayReconnectDelayMs', () {
+    test('maps attempt index with exponential backoff from base ms', () {
+      expect(relayReconnectDelayMs(-2), relayReconnectDelayMs(0));
+      expect(relayReconnectDelayMs(-1), relayReconnectDelayMs(0));
+      expect(relayReconnectDelayMs(0), kRelayReconnectBaseMs << 0);
+      expect(relayReconnectDelayMs(1), kRelayReconnectBaseMs << 1);
+      expect(relayReconnectDelayMs(2), kRelayReconnectBaseMs << 2);
+      expect(relayReconnectDelayMs(3), kRelayReconnectBaseMs << 3);
+      expect(relayReconnectDelayMs(4), kRelayReconnectBaseMs << 4);
+    });
+  });
+
   // ============================================
   // RelayClient state lifecycle
   // ============================================
@@ -343,6 +355,85 @@ void main() {
         senderKeys.publicKeyPem,
       );
       expect(valid, isFalse);
+    });
+  });
+
+  // ============================================
+  // Server push dispatch (p2p:envelope, bridge:status)
+  // ============================================
+
+  group('relayDispatchServerPush', () {
+    test('bridge:status with Map<String,dynamic> data invokes onBridgeStatus', () {
+      Map<String, dynamic>? got;
+      relayDispatchServerPush(
+        {
+          'event': 'bridge:status',
+          'data': {'enabled': true, 'agentPeerId': 'envoy_agent_xyz'},
+        },
+        onBridgeStatus: (m) => got = m,
+      );
+      expect(got, isNotNull);
+      expect(got!['enabled'], isTrue);
+      expect(got!['agentPeerId'], 'envoy_agent_xyz');
+    });
+
+    test('bridge:status with untyped Map copies to Map<String,dynamic>', () {
+      Map<String, dynamic>? got;
+      relayDispatchServerPush(
+        {
+          'event': 'bridge:status',
+          'data': <dynamic, dynamic>{
+            'enabled': false,
+          },
+        },
+        onBridgeStatus: (m) => got = m,
+      );
+      expect(got, isNotNull);
+      expect(got!['enabled'], isFalse);
+    });
+
+    test('bridge:status with non-map data does not invoke callback', () {
+      var called = false;
+      relayDispatchServerPush(
+        {
+          'event': 'bridge:status',
+          'data': 'invalid',
+        },
+        onBridgeStatus: (_) => called = true,
+      );
+      expect(called, isFalse);
+    });
+
+    test('p2p:envelope invokes onEnvelope with remotePeerId', () {
+      Map<String, dynamic>? env;
+      String? rpid;
+      relayDispatchServerPush(
+        {
+          'event': 'p2p:envelope',
+          'data': {
+            'envelope': {
+              'version': '0.1',
+              'messageId': 'm1',
+              'createdAt': '2026-01-01T00:00:00.000Z',
+              'senderPeerId': 'a',
+              'senderPublicKey': 'pem',
+              'senderRole': 'human',
+              'recipientRole': 'human',
+              'intent': 'chat.message',
+              'payload': {'senderOwnerId': 'o', 'text': 'hi'},
+              'signature': 'sig',
+            },
+            'remotePeerId': '12D3KooWabc',
+          },
+        },
+        onEnvelope: (e, r) {
+          env = e;
+          rpid = r;
+        },
+      );
+      expect(env, isNotNull);
+      expect(env!['messageId'], 'm1');
+      expect(rpid, '12D3KooWabc');
     });
   });
 

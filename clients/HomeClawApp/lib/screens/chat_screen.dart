@@ -210,6 +210,22 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
   String _aiChatHidePrefKey() =>
       'companion_ai_hide_v1_${widget.userId.trim()}_${(widget.friendId ?? '').trim()}';
 
+  /// Hive keys for [ChatHistoryStore] must match [EnvoyNodeService.sendChat] /
+  /// [sendChatToOwner] (owner id + peer or owner friend key).
+  String _chatHistoryUserId() {
+    if (!widget.isP2pPeer) return widget.userId;
+    final oid = ref.read(envoyNodeServiceProvider).ownerId;
+    if (oid != null && oid.isNotEmpty) return oid;
+    return widget.userId;
+  }
+
+  String? _chatHistoryFriendKey() {
+    if (!widget.isP2pPeer) return widget.friendId;
+    final po = widget.p2pRecipientOwnerId?.trim();
+    if (po != null && po.isNotEmpty) return po;
+    return widget.friendId;
+  }
+
   Future<void> _bootstrapUserFriendInbox() async {
     final tid = widget.toUserId?.trim();
     if (tid == null || tid.isEmpty) return;
@@ -669,9 +685,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     } else if (widget.isP2pPeer) {
       _loadChatHistory();
       final envoy = ref.read(envoyNodeServiceProvider);
-      _p2pMessageSubscription = envoy.onChatMessage.listen((msg) {
+      _p2pMessageSubscription = envoy.onChatMessage.listen((msg) async {
         if (!mounted) return;
         if (msg.senderPeerId != widget.p2pRecipientPeerId) return;
+        try {
+          await ChatHistoryStore().appendMessage(
+            _chatHistoryUserId(),
+            _chatHistoryFriendKey(),
+            msg.text,
+            false,
+          );
+        } catch (_) {}
+        if (!mounted) return;
         setState(() {
           _messages.add(MapEntry(msg.text, false));
           _messageImages.add(null);
@@ -934,6 +959,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
         widget.toUserId != null &&
         widget.toUserId!.trim().isNotEmpty) {
       _loadUserInbox();
+    } else if (widget.isP2pPeer) {
+      _loadChatHistory();
     } else {
       _checkPendingInboundAndRefresh();
       _syncChatHistoryFromCore();
@@ -942,7 +969,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   void _loadChatHistory() {
     try {
-      final loaded = ChatHistoryStore().load(widget.userId, widget.friendId);
+      final loaded =
+          ChatHistoryStore().load(_chatHistoryUserId(), _chatHistoryFriendKey());
       if (loaded.isEmpty) return;
       _messages.clear();
       _messageImages.clear();
@@ -1271,7 +1299,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       list.add(MapEntry(
           _messages[i], i < _messageImages.length ? _messageImages[i] : null));
     }
-    await ChatHistoryStore().save(widget.userId, list, widget.friendId);
+    await ChatHistoryStore()
+        .save(_chatHistoryUserId(), list, _chatHistoryFriendKey());
   }
 
   /// Get current position as "lat,lng" for Core. Returns null if unavailable or on error.
@@ -1309,7 +1338,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       _aiChatHideBeforeTs = nowTs;
       await prefs.setDouble(_aiChatHidePrefKey(), nowTs);
     }
-    await ChatHistoryStore().clear(widget.userId, widget.friendId);
+    await ChatHistoryStore().clear(_chatHistoryUserId(), _chatHistoryFriendKey());
     if (!mounted) return;
     _messages.clear();
     _messageImages.clear();

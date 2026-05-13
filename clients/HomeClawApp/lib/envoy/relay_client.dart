@@ -6,6 +6,18 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'envoy_identity.dart';
 import 'envoy_protocol.dart';
 
+/// Base delay in ms for [RelayClient] reconnect backoff.
+const int kRelayReconnectBaseMs = 500;
+
+/// Max reconnect attempts before error state.
+const int kRelayReconnectMaxAttempts = 5;
+
+/// Reconnect delay for attempt index `0..n-1` (same formula as [RelayClient._scheduleReconnect]).
+int relayReconnectDelayMs(int attemptIndex) {
+  final i = attemptIndex < 0 ? 0 : attemptIndex;
+  return kRelayReconnectBaseMs * (1 << i);
+}
+
 /// Handles one server push frame (`event` without JSON-RPC `id`).
 ///
 /// Exposed for unit tests; [RelayClient] calls this from [_handleMessage].
@@ -59,8 +71,6 @@ class RelayClient {
   Timer? _heartbeatTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
-  static const _maxReconnectAttempts = 5;
-  static const _reconnectBaseMs = 500;
 
   /// Called when an inbound P2P envelope is received.
   final void Function(Map<String, dynamic> envelope, String remotePeerId)?
@@ -157,12 +167,12 @@ class RelayClient {
   }
 
   void _scheduleReconnect() {
-    if (_reconnectAttempts >= _maxReconnectAttempts) {
+    if (_reconnectAttempts >= kRelayReconnectMaxAttempts) {
       _setState(RelayClientState.error);
       return;
     }
     _setState(RelayClientState.connecting);
-    final delay = _reconnectBaseMs * (1 << _reconnectAttempts);
+    final delay = kRelayReconnectBaseMs * (1 << _reconnectAttempts);
     _reconnectAttempts++;
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(Duration(milliseconds: delay), () {
@@ -329,12 +339,14 @@ class RelayClient {
     required String requesterDeviceId,
     required String requesterDevicePublicKeyPem,
     String? note,
+    String? pairingToken,
   }) async {
     final payload = createDevicePairRequestPayload(
       requesterOwnerId: requesterOwnerId,
       requesterDeviceId: requesterDeviceId,
       requesterDevicePublicKeyPem: requesterDevicePublicKeyPem,
       note: note,
+      pairingToken: pairingToken,
     );
 
     final unsigned = createUnsignedEnvelope(CreateEnvelopeInput(

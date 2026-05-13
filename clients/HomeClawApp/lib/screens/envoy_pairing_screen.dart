@@ -75,6 +75,7 @@ class _EnvoyPairingScreenState extends ConsumerState<EnvoyPairingScreen> {
           await envoy.sendDevicePairRequest(
             payload.agentPeerId!,
             note: 'HomeClaw Companion app pairing',
+            pairingToken: payload.token,
           );
         } catch (_) {
           // Pair request is best-effort; the node may auto-accept on connect

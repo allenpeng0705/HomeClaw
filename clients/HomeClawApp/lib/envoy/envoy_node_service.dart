@@ -262,6 +262,12 @@ class EnvoyNodeService {
     );
 
     await _client!.connect();
+    try {
+      final st = await _client!.getBridgeStatus();
+      if (!_bridgeStatusController.isClosed) {
+        _bridgeStatusController.add(st);
+      }
+    } catch (_) {}
   }
 
   /// Bridge agent (if enabled) plus bonded peers — for Riverpod / UI after connect.
@@ -347,6 +353,7 @@ class EnvoyNodeService {
       requesterDeviceId: _peerId!,
       requesterDevicePublicKeyPem: _publicKeyPem!,
       note: note,
+      pairingToken: pairingToken,
     );
   }
 
