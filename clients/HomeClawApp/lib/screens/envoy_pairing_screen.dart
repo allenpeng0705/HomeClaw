@@ -84,6 +84,14 @@ class _EnvoyPairingScreenState extends ConsumerState<EnvoyPairingScreen> {
       // Persist paired info
       await envoy.savePairedNodeInfo(payload);
 
+      try {
+        notifier.setLoadingContacts(true);
+        final contacts = await envoy.fetchP2PContacts();
+        notifier.setContacts(contacts);
+      } catch (_) {
+        notifier.setLoadingContacts(false);
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

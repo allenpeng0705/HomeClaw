@@ -146,8 +146,8 @@ void main() {
       // Disconnect
       notifier.setDisconnected();
       expect(notifier.state.isConnected, isFalse);
-      // Contacts and identity survive disconnect
-      expect(notifier.state.contacts, isNotEmpty);
+      // Contacts cleared so the friend list does not show a stale P2P bridge while offline.
+      expect(notifier.state.contacts, isEmpty);
       expect(notifier.state.peerId, 'envoy_abc');
     });
   });

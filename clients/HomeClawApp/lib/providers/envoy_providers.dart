@@ -114,6 +114,7 @@ class EnvoyMeshNotifier extends StateNotifier<EnvoyMeshState> {
     state = state.copyWith(
       connectionStatus: RelayClientState.disconnected,
       homeNodeUrl: null,
+      contacts: [],
     );
   }
 

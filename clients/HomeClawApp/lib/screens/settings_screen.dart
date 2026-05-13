@@ -592,15 +592,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                               }
                               await envoy.connect(url);
                               ref.read(envoyMeshProvider.notifier).setConnected(url);
-                              // Auto-discover bridge agent after connection
                               try {
-                                final bridge = await envoy.discoverBridgeAgent();
-                                final bonds = await envoy.getBonds();
-                                final contacts = <EnvoyMeshContact>[];
-                                if (bridge != null) contacts.add(bridge);
-                                contacts.addAll(bonds);
+                                ref.read(envoyMeshProvider.notifier).setLoadingContacts(true);
+                                final contacts = await envoy.fetchP2PContacts();
                                 ref.read(envoyMeshProvider.notifier).setContacts(contacts);
-                              } catch (_) {}
+                              } catch (_) {
+                                ref.read(envoyMeshProvider.notifier).setLoadingContacts(false);
+                              }
                               if (mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(content: Text('Connected via EnvoyMesh P2P')),

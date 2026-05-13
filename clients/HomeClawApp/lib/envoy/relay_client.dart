@@ -6,6 +6,34 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'envoy_identity.dart';
 import 'envoy_protocol.dart';
 
+/// Handles one server push frame (`event` without JSON-RPC `id`).
+///
+/// Exposed for unit tests; [RelayClient] calls this from [_handleMessage].
+void relayDispatchServerPush(
+  Map<String, dynamic> msg, {
+  void Function(Map<String, dynamic> envelope, String remotePeerId)? onEnvelope,
+  void Function(Map<String, dynamic> data)? onBridgeStatus,
+}) {
+  final event = msg['event'] as String?;
+  if (event == 'p2p:envelope') {
+    final data = msg['data'] as Map<String, dynamic>?;
+    if (data != null) {
+      final env = data['envelope'] as Map<String, dynamic>?;
+      final rpid = data['remotePeerId'] as String?;
+      if (env != null) {
+        onEnvelope?.call(env, rpid ?? '');
+      }
+    }
+  } else if (event == 'bridge:status') {
+    final raw = msg['data'];
+    if (raw is Map<String, dynamic>) {
+      onBridgeStatus?.call(raw);
+    } else if (raw is Map) {
+      onBridgeStatus?.call(Map<String, dynamic>.from(raw));
+    }
+  }
+}
+
 /// Connection states for the relay client.
 enum RelayClientState { disconnected, connecting, connected, error }
 
@@ -27,7 +55,7 @@ class RelayClient {
   RelayClientState _state = RelayClientState.disconnected;
   StreamSubscription<dynamic>? _subscription;
   int _nextId = 1;
-  final Map<String, Completer<Map<String, dynamic>>> _pending = {};
+  final Map<String, Completer<dynamic>> _pending = {};
   Timer? _heartbeatTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
@@ -41,6 +69,9 @@ class RelayClient {
   /// Called when the connection state changes.
   final void Function(RelayClientState state)? onStateChange;
 
+  /// Called when the home node pushes `bridge:status` (bridge enabled/disabled, etc.).
+  final void Function(Map<String, dynamic> data)? onBridgeStatus;
+
   RelayClient({
     required this.url,
     required this.peerId,
@@ -49,6 +80,7 @@ class RelayClient {
     required this.ownerId,
     this.onEnvelope,
     this.onStateChange,
+    this.onBridgeStatus,
   });
 
   RelayClientState get state => _state;
@@ -150,17 +182,11 @@ class RelayClient {
       final msg = jsonDecode(raw as String) as Map<String, dynamic>;
       // Server push (event)
       if (msg.containsKey('event') && !msg.containsKey('id')) {
-        final event = msg['event'] as String?;
-        if (event == 'p2p:envelope') {
-          final data = msg['data'] as Map<String, dynamic>?;
-          if (data != null) {
-            final env = data['envelope'] as Map<String, dynamic>?;
-            final rpid = data['remotePeerId'] as String?;
-            if (env != null) {
-              onEnvelope?.call(env, rpid ?? '');
-            }
-          }
-        }
+        relayDispatchServerPush(
+          msg,
+          onEnvelope: onEnvelope,
+          onBridgeStatus: onBridgeStatus,
+        );
         return;
       }
 
@@ -171,7 +197,7 @@ class RelayClient {
         if (msg.containsKey('error')) {
           completer.completeError(msg['error']);
         } else {
-          completer.complete(msg);
+          completer.complete(msg['result']);
         }
       }
     } catch (_) {
@@ -185,14 +211,17 @@ class RelayClient {
   }
 
   /// Send a JSON-RPC request and wait for the response.
-  Future<Map<String, dynamic>> _rpc(
+  ///
+  /// Returns the JSON-RPC `result` field (unwrapped), which may be a map,
+  /// list, null, etc., depending on the method.
+  Future<dynamic> _rpc(
     String method,
     Map<String, dynamic>? params,
   ) async {
     if (_channel == null) throw StateError('not connected');
     final id = 'rpc_${_nextId++}';
     final request = {'id': id, 'method': method, 'params': params ?? {}};
-    final completer = Completer<Map<String, dynamic>>();
+    final completer = Completer<dynamic>();
     _pending[id] = completer;
     _sendJson(request);
     return completer.future.timeout(
@@ -256,14 +285,28 @@ class RelayClient {
     return signed.messageId;
   }
 
+  /// Same fields as embedded in [getNodeConfig] when bridge is enabled.
+  Future<Map<String, dynamic>> getBridgeStatus() async {
+    final r = await _rpc('getBridgeStatus', null);
+    if (r is Map<String, dynamic>) return r;
+    if (r is Map) return Map<String, dynamic>.from(r);
+    throw StateError('getBridgeStatus: unexpected result type ${r.runtimeType}');
+  }
+
   /// Get the node's current status.
   Future<Map<String, dynamic>> getNodeStatus() async {
-    return _rpc('getNodeStatus', null);
+    final r = await _rpc('getNodeStatus', null);
+    if (r is Map<String, dynamic>) return r;
+    if (r is Map) return Map<String, dynamic>.from(r);
+    throw StateError('getNodeStatus: unexpected result type ${r.runtimeType}');
   }
 
   /// Get the node's configuration.
   Future<Map<String, dynamic>> getNodeConfig() async {
-    return _rpc('getNodeConfig', null);
+    final r = await _rpc('getNodeConfig', null);
+    if (r is Map<String, dynamic>) return r;
+    if (r is Map) return Map<String, dynamic>.from(r);
+    throw StateError('getNodeConfig: unexpected result type ${r.runtimeType}');
   }
 
   /// Get bonded contacts from the home node.
@@ -271,10 +314,9 @@ class RelayClient {
   /// Returns a list of bond records, each containing at minimum
   /// `peerOwnerId` and `displayName`.
   Future<List<Map<String, dynamic>>> getBonds() async {
-    final result = await _rpc('getBonds', null);
-    final bonds = result['result'] as List<dynamic>?;
-    if (bonds == null) return [];
-    return bonds.cast<Map<String, dynamic>>();
+    final r = await _rpc('getBonds', null);
+    if (r is! List<dynamic>) return [];
+    return r.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
   /// Build, sign, and send a device.pair.request envelope through the relay.

@@ -18,6 +18,7 @@ import 'screens/friend_list_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/open_chat_from_push_screen.dart';
 import 'screens/permissions_screen.dart';
+import 'widgets/envoy_mesh_riverpod_sync.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -203,6 +204,8 @@ class HomeClawCompanionApp extends StatelessWidget {
       ),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
+      builder: (context, child) =>
+          EnvoyMeshRiverpodSync(child: child ?? const SizedBox.shrink()),
       home: _InitialScreen(
         coreService: coreService,
         initialMessage: initialMessage,

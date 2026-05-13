@@ -177,6 +177,13 @@ class EnvoyNodeService {
   Stream<RelayClientState> get onStatusChange =>
       _statusChangeController.stream;
 
+  final StreamController<Map<String, dynamic>> _bridgeStatusController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  /// Home node `bridge:status` push events (same payload as periodic [discoverBridgeAgent] source).
+  Stream<Map<String, dynamic>> get onBridgeStatusFromNode =>
+      _bridgeStatusController.stream;
+
   // ============================================
   // Identity lifecycle
   // ============================================
@@ -247,9 +254,25 @@ class EnvoyNodeService {
       onStateChange: (state) {
         _statusChangeController.add(state);
       },
+      onBridgeStatus: (data) {
+        if (!_bridgeStatusController.isClosed) {
+          _bridgeStatusController.add(data);
+        }
+      },
     );
 
     await _client!.connect();
+  }
+
+  /// Bridge agent (if enabled) plus bonded peers — for Riverpod / UI after connect.
+  Future<List<EnvoyMeshContact>> fetchP2PContacts() async {
+    _requireConnected();
+    final bridge = await discoverBridgeAgent();
+    final bonds = await getBonds();
+    final contacts = <EnvoyMeshContact>[];
+    if (bridge != null) contacts.add(bridge);
+    contacts.addAll(bonds);
+    return contacts;
   }
 
   /// Disconnect from the home node and clean up.
@@ -419,10 +442,14 @@ class EnvoyNodeService {
     final agentPeerId = bridge['agentPeerId'] as String?;
     if (agentPeerId == null || agentPeerId.isEmpty) return null;
 
+    final name = (bridge['agentName'] as String?)?.trim();
+    final displayName =
+        (name != null && name.isNotEmpty) ? name : 'My Agent';
+
     return EnvoyMeshContact(
       peerId: agentPeerId,
       ownerId: _ownerId!,
-      displayName: 'My Agent',
+      displayName: displayName,
       role: 'agent',
     );
   }
@@ -510,6 +537,9 @@ class EnvoyNodeService {
     } catch (_) {}
     try {
       await _statusChangeController.close();
+    } catch (_) {}
+    try {
+      await _bridgeStatusController.close();
     } catch (_) {}
   }
 }

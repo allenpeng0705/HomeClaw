@@ -1310,7 +1310,7 @@ class PairingPayload {
       params['agentPeerId'] = agentPeerId!;
     }
     if (agentPubKey != null && agentPubKey!.isNotEmpty) {
-      params['agentPubKey'] = Uri.encodeComponent(agentPubKey!);
+      params['agentPubKey'] = agentPubKey!;
     }
     if (token != null && token!.isNotEmpty) {
       params['token'] = token!;
