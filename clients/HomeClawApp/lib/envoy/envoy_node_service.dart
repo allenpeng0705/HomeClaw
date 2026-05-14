@@ -240,10 +240,14 @@ class EnvoyNodeService {
   ///
   /// [pairingAlternateDialUrl] retries after a flaky first hop (canonical URL built
   /// from [PairingPayload.reconstructedDialWsUrl]).
+  ///
+  /// [pairingRelayPeerId] is the QR `relayPeerId`; some relays require it on probe
+  /// `params` as well as in the WebSocket URL query string.
   Future<void> connect(
     String homeNodeUrl, {
     String? pairingWsToken,
     String? pairingAlternateDialUrl,
+    String? pairingRelayPeerId,
   }) async {
     if (!isInitialized) {
       throw StateError('EnvoyNodeService not initialized — call initialize() first');
@@ -265,6 +269,7 @@ class EnvoyNodeService {
         ownerId: _ownerId!,
         connectHeaders: hdrs,
         pairingProbeToken: pairingWsToken,
+        pairingRelayPeerId: pairingRelayPeerId,
         onEnvelope: _handleInboundEnvelope,
         onStateChange: (state) {
           _statusChangeController.add(state);
@@ -285,16 +290,16 @@ class EnvoyNodeService {
         );
       }
       try {
-        await _client!.assertRelayHealthy().timeout(const Duration(seconds: 25));
+        await _client!.assertRelayHealthy().timeout(const Duration(seconds: 40));
       } catch (e, st) {
         await disconnect();
         final detail = e.toString();
         final dropped = detail.contains('disconnected');
         final hint = dropped
             ? ' The relay closed the WebSocket before any RPC reply — check target '
-              'and token match the node. If the QR has a pairing token, the app '
-              'sends it on the HTTP upgrade headers and may probe with '
-              '`params.token` too.'
+              'and token match the node. With a pairing token, the app sends it '
+              'on upgrade headers and probes JSON-RPC params (`token`, '
+              '`peerId`+`token`, `target`+`token`).'
             : '';
         Error.throwWithStackTrace(
           StateError(

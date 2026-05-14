@@ -81,12 +81,13 @@ void main() {
       });
 
       test('decodes envoy QR with routed wsUrl, relayWsUrl, and nested query tokens', () {
+        // relayPeerId is the RELAY's peer ID (different from the home node target in wsUrl)
         final uri = Uri.parse(
           'envoy://pair'
           '?wsUrl=ws%3A%2F%2F47.93.11.212%3A15432%2Fws'
-          '%3Ftarget%3D12D3KooWQsD3ougrAJjmKeevSiY2azE5CKqLjcijyYreS6fUFYCR'
+          '%3Ftarget%3D12D3KooWQhome789012345678901234567890123456789'
           '%26token%3Df3d8d8b5-11c4-40fa-9185-aec40a9da36'
-          '&relayPeerId=12D3KooWQsD3ougrAJjmKeevSiY2azE5CKqLjcijyYreS6fUFYCR'
+          '&relayPeerId=12D3KooWLNR4WYWHBswe8ux5zWsy6cuGywnYPJbdbaAbbpmJMjbo'
           '&relayWsUrl=ws%3A%2F%2F47.93.11.212%3A15432%2Fws'
           '&agentPeerId=envoy_agent_hkHN'
           '&token=f3d8d8b5-11c4-40fa-9185-aec40a9da36',
@@ -94,28 +95,32 @@ void main() {
         final payload = PairingPayload.fromUri(uri);
         expect(payload, isNotNull);
         expect(payload!.wsUrl.startsWith('ws://47.93.11.212:15432/ws'), isTrue);
-        expect(payload.wsUrl.contains('target=12D3KooWQ'), isTrue);
+        expect(payload.wsUrl.contains('target=12D3KooWQhome'), isTrue);
         expect(payload.wsUrl.contains('token=f3d8d8b5'), isTrue);
         expect(payload.relayWsUrl, 'ws://47.93.11.212:15432/ws');
-        expect(payload.relayPeerId, contains('12D3KooW'));
+        // relayPeerId is the RELAY's peer ID, NOT the home node
+        expect(payload.relayPeerId, contains('12D3KooWLNR'));
+        // reconstructedDialWsUrl extracts target from wsUrl (home node), not relayPeerId (relay)
         expect(
           payload.reconstructedDialWsUrl(),
-          'ws://47.93.11.212:15432/ws?target=12D3KooWQsD3ougrAJjmKeevSiY2azE5CKqLjcijyYreS6fUFYCR&token=f3d8d8b5-11c4-40fa-9185-aec40a9da36',
+          'ws://47.93.11.212:15432/ws?target=12D3KooWQhome789012345678901234567890123456789&token=f3d8d8b5-11c4-40fa-9185-aec40a9da36',
         );
       });
 
       test('reconstructedDialWsUrl merges target/token onto existing relayWsUrl query', () {
+        // relayPeerId is the RELAY's peer ID; target comes from wsUrl's query params
         final payload = PairingPayload(
-          wsUrl: 'ws://h/ws',
+          wsUrl: 'ws://47.93.11.212:15432/ws?target=12D3KooWQhome&token=tok',
           relayWsUrl: 'ws://47.93.11.212:15432/ws?ns=mesh',
-          relayPeerId: '12D3KooWQsD3ougrAJjmKeevSiY2azE5CKqLjcijyYreS6fUFYCR',
+          relayPeerId: '12D3KooWLNRrelay',
           token: 'f3d8d8b5-11c4-40fa-9185-aec40a9da36',
         );
         final r = payload.reconstructedDialWsUrl();
         expect(r, isNotNull);
         final u = Uri.parse(r!);
         expect(u.queryParameters['ns'], 'mesh');
-        expect(u.queryParameters['target'], payload.relayPeerId);
+        // target is extracted from wsUrl (home node), NOT from relayPeerId (relay)
+        expect(u.queryParameters['target'], '12D3KooWQhome');
         expect(u.queryParameters['token'], payload.token);
       });
 

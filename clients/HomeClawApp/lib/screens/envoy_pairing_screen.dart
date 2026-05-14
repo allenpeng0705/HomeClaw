@@ -95,6 +95,7 @@ class _EnvoyPairingScreenState extends ConsumerState<EnvoyPairingScreen> {
           .connect(
             payload.wsUrl,
             pairingWsToken: payload.token,
+            pairingRelayPeerId: payload.relayPeerId,
             pairingAlternateDialUrl: (altWs != null && altWs != payload.wsUrl)
                 ? altWs
                 : null,

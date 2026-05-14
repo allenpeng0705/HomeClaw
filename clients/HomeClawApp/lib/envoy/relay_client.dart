@@ -134,8 +134,10 @@ class RelayClient {
   final Map<String, dynamic>? connectHeaders;
 
   /// When pairing supplies `pairingProbeToken` at construction time, [assertRelayHealthy]
-  /// also tries `"params": {"token": …}` between `{}` and omitting `params`.
+  /// tries `"params": {"token": …}`, then `peerId`/`target` + token maps, before omitting `params`.
   final String? _pairingProbeToken;
+  /// Relay peer id from the pairing QR (`relayPeerId`); included in some RPC probe param shapes.
+  final String? _pairingRelayPeerId;
 
   /// Called when an inbound P2P envelope is received.
   final void Function(Map<String, dynamic> envelope, String remotePeerId)?
@@ -155,13 +157,15 @@ class RelayClient {
     required this.ownerId,
     Map<String, dynamic>? connectHeaders,
     String? pairingProbeToken,
+    String? pairingRelayPeerId,
     this.onEnvelope,
     this.onStateChange,
     this.onBridgeStatus,
   })  : connectHeaders = (connectHeaders == null || connectHeaders.isEmpty)
             ? null
             : Map<String, dynamic>.from(connectHeaders),
-        _pairingProbeToken = _trimOrNull(pairingProbeToken);
+        _pairingProbeToken = _trimOrNull(pairingProbeToken),
+        _pairingRelayPeerId = _trimOrNull(pairingRelayPeerId);
 
   RelayClientState get state => _state;
 
@@ -312,12 +316,17 @@ class RelayClient {
       e is StateError && e.message.contains('not connected');
 
   List<Map<String, dynamic>?> _relayProbeParamVariants() {
-    // Order: `{}` first (strict JSON-RPC); optional token body; omit `params` last.
-    final v = <Map<String, dynamic>?>[<String, dynamic>{}, null];
     final t = _pairingProbeToken;
+    final pid = _pairingRelayPeerId;
+    final v = <Map<String, dynamic>?>[<String, dynamic>{}];
     if (t != null) {
-      v.insert(1, <String, dynamic>{'token': t});
+      v.add(<String, dynamic>{'token': t});
+      if (pid != null) {
+        v.add(<String, dynamic>{'peerId': pid, 'token': t});
+        v.add(<String, dynamic>{'target': pid, 'token': t});
+      }
     }
+    v.add(null);
     return v;
   }
 

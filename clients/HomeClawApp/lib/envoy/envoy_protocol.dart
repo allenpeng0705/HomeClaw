@@ -1358,20 +1358,25 @@ class PairingPayload {
 
   /// Rebuilds `ws(s)://…/ws?…&target=…&token=…` from [relayWsUrl] + pairing IDs.
   ///
+  /// Extracts the home node's peer ID (target) from [wsUrl]'s query parameters.
+  /// [relayPeerId] is the RELAY's peer ID — it must NOT be used as a dial target,
+  /// otherwise the relay would try to dial itself ("Can not dial self").
+  ///
   /// Merges `target` and `token` into the relay URI query (preserving any other
   /// params on [relayWsUrl]). Pairing may retry with this when the primary [wsUrl]
   /// dial is flaky.
   String? reconstructedDialWsUrl() {
     final base = relayWsUrl?.trim();
-    final tgt = relayPeerId?.trim();
     final tok = token?.trim();
     if (base == null || base.isEmpty) return null;
-    if (tgt == null ||
-        tgt.isEmpty ||
-        tok == null ||
-        tok.isEmpty) {
-      return null;
-    }
+    if (tok == null || tok.isEmpty) return null;
+
+    // Extract the home node's peer ID from the primary wsUrl query params.
+    // relayPeerId is the RELAY's peer ID — using it as target causes
+    // "Can not dial self".
+    final tgt = Uri.parse(wsUrl).queryParameters['target']?.trim();
+    if (tgt == null || tgt.isEmpty) return null;
+
     final u = Uri.parse(base);
     // Merge so we do not drop other relay query params that may ride on [relayWsUrl].
     final merged = Map<String, String>.from(u.queryParameters);
