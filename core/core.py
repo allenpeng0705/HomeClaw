@@ -1249,7 +1249,7 @@ class Core(CoreInterface):
                 try:
                     host = response.host if response.host != '0.0.0.0' else '127.0.0.1'
                     port = response.port
-                    # When host=inbound and port=0: sync /inbound and /ws already returned the response in the HTTP/WS body. But when the request came via request_queue (e.g. POST /process), the HTTP response was "Request received" — so we must deliver the reply via WebSocket/push (deliver_to_user) so Companion receives it.
+                    # When host=inbound and port=0: sync /inbound and /ws return the reply in the HTTP/WS body — response_queue chunks are tagged inbound_sync_delivery so we skip duplicate deliver_to_user. POST /process returns "Request received" — deliver via WebSocket (no inbound_sync_delivery). Async POST /inbound (poll) also uses deliver_to_user.
                     if host == "inbound" and (port == 0 or port == "0"):
                         try:
                             meta = getattr(response, "request_metadata", None) or {}
@@ -1260,12 +1260,17 @@ class Core(CoreInterface):
                             rdata = rdata if isinstance(rdata, dict) else {}
                             text = rdata.get("text", "") if isinstance(rdata.get("text"), str) else str(rdata.get("text", "") or "")
                             imgs = rdata.get("images") if isinstance(rdata.get("images"), list) else ([rdata.get("image")] if rdata.get("image") else None)
-                            if text or imgs:
+                            if meta.get("inbound_sync_delivery"):
+                                logger.debug(
+                                    "Skip deliver_to_user: sync inbound already returned to client (channel={})",
+                                    response.from_channel,
+                                )
+                            elif text or imgs:
                                 await self.deliver_to_user(uid, text or "", images=imgs, source="inbound", from_friend="HomeClaw")
                                 logger.info("Core: response delivered to user (inbound/Companion) user_id={}", uid)
                         except Exception as e:
                             logger.warning("deliver_to_user for inbound response failed: {}", e)
-                        logger.debug("Skip get_response POST for inbound channel {} (response delivered via WebSocket/push).", response.from_channel)
+                        logger.debug("Skip get_response POST for inbound channel {} (host=inbound port=0).", response.from_channel)
                     else:
                         path = '/get_response'
                         resp_url = f"http://{host}:{port}{path}"

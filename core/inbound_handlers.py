@@ -218,6 +218,16 @@ async def handle_inbound_request_impl(
     else:
         content_type_for_perm = ContentType.TEXT
     request_metadata = {"user_id": request.user_id, "channel": request.channel_name}
+    # Sync POST/WS returns the reply to the caller; tool chunks still hit response_queue but must not
+    # duplicate-push via deliver_to_user. Async POST /inbound (202) sets ASYNC_INBOUND_REQUEST_ID — keep WS delivery.
+    try:
+        from core.inbound_async_context import ASYNC_INBOUND_REQUEST_ID
+
+        _async_inbound_id = ASYNC_INBOUND_REQUEST_ID.get()
+    except Exception:
+        _async_inbound_id = None
+    if progress_queue is None and _async_inbound_id is None:
+        request_metadata["inbound_sync_delivery"] = True
     _pub_base = (getattr(request, "public_request_base_url", None) or "").strip().rstrip("/")
     if _pub_base:
         request_metadata["public_request_base_url"] = _pub_base

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -38,33 +40,72 @@ class _EnvoyPairingScreenState extends ConsumerState<EnvoyPairingScreen> {
     if (_scanned || _pairing) return;
     final list = capture.barcodes;
     if (list.isEmpty) return;
-    final code = list.first.rawValue;
-    if (code == null || code.isEmpty) return;
-    final uri = Uri.tryParse(code);
-    if (uri == null) return;
+    final raw = list.first.rawValue;
+    if (raw == null || raw.isEmpty) return;
+    final code = raw.trim();
 
-    // Decode pairing payload
+    Future<void> fail(String msg) async {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      setState(() {
+        _scanned = false;
+        _pairing = false;
+        _statusText = '';
+      });
+    }
+
+    final uri = Uri.tryParse(code);
+    if (uri == null) {
+      await fail('QR is not a valid URL');
+      return;
+    }
+
     final payload = PairingPayload.fromUri(uri);
-    if (payload == null) return;
+    if (payload == null) {
+      await fail('Not an Envoy mesh pairing QR (need envoy://pair?wsUrl=…)');
+      return;
+    }
 
     setState(() {
       _scanned = true;
       _pairing = true;
-      _statusText = 'Connecting to home node…';
+      _statusText = '';
     });
 
+    final envoy = ref.read(envoyNodeServiceProvider);
+    final notifier = ref.read(envoyMeshProvider.notifier);
+
     try {
-      final envoy = ref.read(envoyNodeServiceProvider);
-      final notifier = ref.read(envoyMeshProvider.notifier);
 
       // Ensure identity is loaded
       if (!envoy.isInitialized) {
-        await envoy.initialize();
+        if (mounted) setState(() => _statusText = 'Preparing device keys…');
+        await envoy.initialize().timeout(
+          const Duration(seconds: 30),
+          onTimeout: () => throw TimeoutException(
+            'Key setup timed out. Try again or restart the app.',
+          ),
+        );
         notifier.setInitialized(envoy.peerId!, envoy.ownerId!);
       }
 
-      // Connect to relay
-      await envoy.connect(payload.wsUrl);
+      if (mounted) setState(() => _statusText = 'Connecting to home node…');
+      final altWs = payload.reconstructedDialWsUrl();
+      await envoy
+          .connect(
+            payload.wsUrl,
+            pairingWsToken: payload.token,
+            pairingAlternateDialUrl: (altWs != null && altWs != payload.wsUrl)
+                ? altWs
+                : null,
+          )
+          .timeout(
+        const Duration(seconds: 60),
+        onTimeout: () => throw TimeoutException(
+          'Connecting to the relay timed out. Check the URL, VPN or firewall, '
+          'and that the Envoy node is running.',
+        ),
+      );
       notifier.setConnected(payload.wsUrl);
 
       // Send device pair request to bridge agent if present
@@ -104,10 +145,16 @@ class _EnvoyPairingScreenState extends ConsumerState<EnvoyPairingScreen> {
         Navigator.of(context).maybePop();
       }
     } catch (e) {
-      ref.read(envoyMeshProvider.notifier).setError(e.toString());
+      try {
+        await envoy.disconnect();
+      } catch (_) {}
+      final userMsg = e is TimeoutException
+          ? (e.message ?? 'Operation timed out.')
+          : e.toString();
+      ref.read(envoyMeshProvider.notifier).setError(userMsg);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Pairing failed: $e')),
+          SnackBar(content: Text('Pairing failed: $userMsg')),
         );
         setState(() {
           _scanned = false;

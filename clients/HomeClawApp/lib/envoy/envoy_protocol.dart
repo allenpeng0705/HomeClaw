@@ -2,8 +2,6 @@ import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
 
-import 'envoy_identity.dart';
-
 const _uuid = Uuid();
 
 // ============================================
@@ -1293,9 +1291,14 @@ DevicePairRequestPayload parseDevicePairRequestPayload(dynamic input) {
 /// The desktop/home node displays a QR with this data. The mobile app scans
 /// it and uses the fields to connect and send a device pair request.
 ///
-/// URI format: `envoy://pair?wsUrl=...&relayPeerId=...&agentPeerId=...`
+/// URI format: `envoy://pair?wsUrl=...&relayWsUrl=...&relayPeerId=...&agentPeerId=...`
+///
+/// [wsUrl] is the canonical WebSocket used to dial (often includes `?target=` and `token`).
+/// Optional [relayWsUrl] is the bare relay `/ws` when the emitter also publishes a routed URL.
 class PairingPayload {
   final String wsUrl;
+  /// Bare relay WS (e.g. `ws://host:port/ws`) when [wsUrl] also carries routed query params.
+  final String? relayWsUrl;
   final String? relayPeerId;
   final String? agentPeerId;
   final String? agentPubKey;
@@ -1303,6 +1306,7 @@ class PairingPayload {
 
   const PairingPayload({
     required this.wsUrl,
+    this.relayWsUrl,
     this.relayPeerId,
     this.agentPeerId,
     this.agentPubKey,
@@ -1312,6 +1316,9 @@ class PairingPayload {
   /// Encode to a `envoy://pair?...` URI for QR display.
   String toUri() {
     final params = <String, String>{'wsUrl': wsUrl};
+    if (relayWsUrl != null && relayWsUrl!.isNotEmpty) {
+      params['relayWsUrl'] = relayWsUrl!;
+    }
     if (relayPeerId != null && relayPeerId!.isNotEmpty) {
       params['relayPeerId'] = relayPeerId!;
     }
@@ -1332,16 +1339,45 @@ class PairingPayload {
   /// Returns null if the URI scheme/host is not `envoy://pair` or if
   /// the required `wsUrl` parameter is missing.
   static PairingPayload? fromUri(Uri uri) {
-    if (uri.scheme != 'envoy' || uri.host != 'pair') return null;
-    final wsUrl = uri.queryParameters['wsUrl']?.trim();
+    if (uri.scheme.toLowerCase() != 'envoy' ||
+        uri.host.toLowerCase() != 'pair') {
+      return null;
+    }
+    final qs = uri.queryParameters;
+    final wsUrl = (qs['wsUrl'] ?? qs['ws_url'])?.trim();
     if (wsUrl == null || wsUrl.isEmpty) return null;
     return PairingPayload(
       wsUrl: wsUrl,
-      relayPeerId: uri.queryParameters['relayPeerId']?.trim(),
-      agentPeerId: uri.queryParameters['agentPeerId']?.trim(),
-      agentPubKey: uri.queryParameters['agentPubKey']?.trim(),
-      token: uri.queryParameters['token']?.trim(),
+      relayWsUrl: qs['relayWsUrl']?.trim(),
+      relayPeerId: qs['relayPeerId']?.trim(),
+      agentPeerId: qs['agentPeerId']?.trim(),
+      agentPubKey: qs['agentPubKey']?.trim(),
+      token: qs['token']?.trim(),
     );
+  }
+
+  /// Rebuilds `ws(s)://…/ws?…&target=…&token=…` from [relayWsUrl] + pairing IDs.
+  ///
+  /// Merges `target` and `token` into the relay URI query (preserving any other
+  /// params on [relayWsUrl]). Pairing may retry with this when the primary [wsUrl]
+  /// dial is flaky.
+  String? reconstructedDialWsUrl() {
+    final base = relayWsUrl?.trim();
+    final tgt = relayPeerId?.trim();
+    final tok = token?.trim();
+    if (base == null || base.isEmpty) return null;
+    if (tgt == null ||
+        tgt.isEmpty ||
+        tok == null ||
+        tok.isEmpty) {
+      return null;
+    }
+    final u = Uri.parse(base);
+    // Merge so we do not drop other relay query params that may ride on [relayWsUrl].
+    final merged = Map<String, String>.from(u.queryParameters);
+    merged['target'] = tgt;
+    merged['token'] = tok;
+    return u.replace(queryParameters: merged).toString();
   }
 
   @override

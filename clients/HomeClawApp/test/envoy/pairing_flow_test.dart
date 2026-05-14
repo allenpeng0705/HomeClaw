@@ -80,6 +80,56 @@ void main() {
         expect(payload.agentPeerId, 'envoy_agent_abc123');
       });
 
+      test('decodes envoy QR with routed wsUrl, relayWsUrl, and nested query tokens', () {
+        final uri = Uri.parse(
+          'envoy://pair'
+          '?wsUrl=ws%3A%2F%2F47.93.11.212%3A15432%2Fws'
+          '%3Ftarget%3D12D3KooWQsD3ougrAJjmKeevSiY2azE5CKqLjcijyYreS6fUFYCR'
+          '%26token%3Df3d8d8b5-11c4-40fa-9185-aec40a9da36'
+          '&relayPeerId=12D3KooWQsD3ougrAJjmKeevSiY2azE5CKqLjcijyYreS6fUFYCR'
+          '&relayWsUrl=ws%3A%2F%2F47.93.11.212%3A15432%2Fws'
+          '&agentPeerId=envoy_agent_hkHN'
+          '&token=f3d8d8b5-11c4-40fa-9185-aec40a9da36',
+        );
+        final payload = PairingPayload.fromUri(uri);
+        expect(payload, isNotNull);
+        expect(payload!.wsUrl.startsWith('ws://47.93.11.212:15432/ws'), isTrue);
+        expect(payload.wsUrl.contains('target=12D3KooWQ'), isTrue);
+        expect(payload.wsUrl.contains('token=f3d8d8b5'), isTrue);
+        expect(payload.relayWsUrl, 'ws://47.93.11.212:15432/ws');
+        expect(payload.relayPeerId, contains('12D3KooW'));
+        expect(
+          payload.reconstructedDialWsUrl(),
+          'ws://47.93.11.212:15432/ws?target=12D3KooWQsD3ougrAJjmKeevSiY2azE5CKqLjcijyYreS6fUFYCR&token=f3d8d8b5-11c4-40fa-9185-aec40a9da36',
+        );
+      });
+
+      test('reconstructedDialWsUrl merges target/token onto existing relayWsUrl query', () {
+        final payload = PairingPayload(
+          wsUrl: 'ws://h/ws',
+          relayWsUrl: 'ws://47.93.11.212:15432/ws?ns=mesh',
+          relayPeerId: '12D3KooWQsD3ougrAJjmKeevSiY2azE5CKqLjcijyYreS6fUFYCR',
+          token: 'f3d8d8b5-11c4-40fa-9185-aec40a9da36',
+        );
+        final r = payload.reconstructedDialWsUrl();
+        expect(r, isNotNull);
+        final u = Uri.parse(r!);
+        expect(u.queryParameters['ns'], 'mesh');
+        expect(u.queryParameters['target'], payload.relayPeerId);
+        expect(u.queryParameters['token'], payload.token);
+      });
+
+      test('decodes Envoy scheme/host case-insensitively', () {
+        final uri = Uri.parse(
+          'ENVoy://pair?ws_url=ws%3A%2F%2Fhost%3A3030%2Fws'
+          '&token=t1',
+        );
+        final payload = PairingPayload.fromUri(uri);
+        expect(payload, isNotNull);
+        expect(payload!.wsUrl, 'ws://host:3030/ws');
+        expect(payload.token, 't1');
+      });
+
       test('ignores unknown query parameters', () {
         final uri = Uri.parse(
           'envoy://pair?wsUrl=ws://host:3030/ws&foo=bar&baz=qux',

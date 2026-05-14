@@ -442,20 +442,20 @@ void main() {
   // ============================================
 
   group('JSON-RPC format', () {
-    test('request format is valid', () {
+    test('request shape matches JSON-RPC 2.0 (numeric id)', () {
       final request = {
-        'id': 'rpc_1',
+        'jsonrpc': '2.0',
+        'id': 1,
         'method': 'forwardEnvelope',
         'params': {
           'envelope': {'version': '0.1', 'intent': 'chat.message'},
         },
       };
 
+      expect(request['jsonrpc'], '2.0');
       expect(request.containsKey('id'), isTrue);
       expect(request.containsKey('method'), isTrue);
-      expect(request['id'], 'rpc_1');
-      expect(request['method'], 'forwardEnvelope');
-      expect(request['params'], isA<Map<String, dynamic>>());
+      expect(request.containsKey('params'), isTrue);
     });
 
     test('event format is valid', () {

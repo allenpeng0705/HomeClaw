@@ -234,40 +234,126 @@ class EnvoyNodeService {
   /// Must call [initialize] first.
   ///
   /// If already connected, disconnects first then reconnects to the new URL.
-  Future<void> connect(String homeNodeUrl) async {
+  ///
+  /// Pairing QR data: send [pairingWsToken] so the upgrade request can carry
+  /// `Authorization: Bearer …` and `X-Pairing-Token` (some relays require this).
+  ///
+  /// [pairingAlternateDialUrl] retries after a flaky first hop (canonical URL built
+  /// from [PairingPayload.reconstructedDialWsUrl]).
+  Future<void> connect(
+    String homeNodeUrl, {
+    String? pairingWsToken,
+    String? pairingAlternateDialUrl,
+  }) async {
     if (!isInitialized) {
       throw StateError('EnvoyNodeService not initialized — call initialize() first');
     }
 
+    final prefs = await SharedPreferences.getInstance();
+    final hdrs = _pairingRelayUpgradeHeaders(pairingWsToken);
+
+    Future<void> dialWs(String wsUrl) async {
+      await prefs.setString(_keyHomeNodeUrl, wsUrl);
+
+      await disconnect();
+
+      _client = RelayClient(
+        url: wsUrl,
+        peerId: _peerId!,
+        publicKeyPem: _publicKeyPem!,
+        privateKeyPem: _privateKeyPem!,
+        ownerId: _ownerId!,
+        connectHeaders: hdrs,
+        pairingProbeToken: pairingWsToken,
+        onEnvelope: _handleInboundEnvelope,
+        onStateChange: (state) {
+          _statusChangeController.add(state);
+        },
+        onBridgeStatus: (data) {
+          if (!_bridgeStatusController.isClosed) {
+            _bridgeStatusController.add(data);
+          }
+        },
+      );
+
+      await _client!.connect();
+      if (_client!.state != RelayClientState.connected) {
+        await disconnect();
+        throw StateError(
+          'Envoy relay: WebSocket did not reach connected state (check network, '
+          'URL, and cleartext / local network permissions).',
+        );
+      }
+      try {
+        await _client!.assertRelayHealthy().timeout(const Duration(seconds: 25));
+      } catch (e, st) {
+        await disconnect();
+        final detail = e.toString();
+        final dropped = detail.contains('disconnected');
+        final hint = dropped
+            ? ' The relay closed the WebSocket before any RPC reply — check target '
+              'and token match the node. If the QR has a pairing token, the app '
+              'sends it on the HTTP upgrade headers and may probe with '
+              '`params.token` too.'
+            : '';
+        Error.throwWithStackTrace(
+          StateError(
+            'Envoy relay: connected but home node RPC failed ($detail).$hint '
+            'Ensure the pairing WebSocket URL includes any '
+            'required target/token query params from the pairing QR.',
+          ),
+          st,
+        );
+      }
+      _client!.enablePeriodicKeepalive();
+      try {
+        final st = await _client!.getBridgeStatus();
+        if (!_bridgeStatusController.isClosed) {
+          _bridgeStatusController.add(st);
+        }
+      } catch (_) {
+        // Bridge RPC may be absent or gated.
+      }
+    }
+
     await disconnect();
 
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyHomeNodeUrl, homeNodeUrl);
-
-    _client = RelayClient(
-      url: homeNodeUrl,
-      peerId: _peerId!,
-      publicKeyPem: _publicKeyPem!,
-      privateKeyPem: _privateKeyPem!,
-      ownerId: _ownerId!,
-      onEnvelope: _handleInboundEnvelope,
-      onStateChange: (state) {
-        _statusChangeController.add(state);
-      },
-      onBridgeStatus: (data) {
-        if (!_bridgeStatusController.isClosed) {
-          _bridgeStatusController.add(data);
-        }
-      },
-    );
-
-    await _client!.connect();
     try {
-      final st = await _client!.getBridgeStatus();
-      if (!_bridgeStatusController.isClosed) {
-        _bridgeStatusController.add(st);
+      await dialWs(homeNodeUrl.trim());
+      return;
+    } catch (eMain, stMain) {
+      final alt = pairingAlternateDialUrl?.trim();
+      final primary = homeNodeUrl.trim();
+      final es = eMain.toString();
+      final worthAlt = alt != null &&
+          alt.isNotEmpty &&
+          alt != primary &&
+          (es.contains('disconnected') ||
+              es.contains('Timeout') ||
+              es.contains('timed out') ||
+              es.contains('no RPC probe'));
+      if (!worthAlt) {
+        Error.throwWithStackTrace(eMain, stMain);
       }
-    } catch (_) {}
+
+      await disconnect();
+
+      try {
+        await dialWs(alt);
+      } catch (_) {
+        Error.throwWithStackTrace(eMain, stMain);
+      }
+      return;
+    }
+  }
+
+  static Map<String, dynamic>? _pairingRelayUpgradeHeaders(String? token) {
+    final t = token?.trim();
+    if (t == null || t.isEmpty) return null;
+    return <String, dynamic>{
+      'Authorization': 'Bearer $t',
+      'X-Pairing-Token': t,
+    };
   }
 
   /// Bridge agent (if enabled) plus bonded peers — for Riverpod / UI after connect.
@@ -285,8 +371,13 @@ class EnvoyNodeService {
   ///
   /// Safe to call when already disconnected.
   Future<void> disconnect() async {
-    await _client?.disconnect();
+    final c = _client;
     _client = null;
+    if (c != null) {
+      try {
+        await c.disconnect().timeout(const Duration(seconds: 8));
+      } catch (_) {}
+    }
   }
 
   /// Get the last-used home node URL from storage, if any.
@@ -307,6 +398,8 @@ class EnvoyNodeService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyPairedNodeInfo, jsonEncode({
       'wsUrl': payload.wsUrl,
+      if (payload.relayWsUrl != null && payload.relayWsUrl!.isNotEmpty)
+        'relayWsUrl': payload.relayWsUrl,
       if (payload.relayPeerId != null) 'relayPeerId': payload.relayPeerId,
       if (payload.agentPeerId != null) 'agentPeerId': payload.agentPeerId,
       if (payload.agentPubKey != null) 'agentPubKey': payload.agentPubKey,
@@ -325,6 +418,7 @@ class EnvoyNodeService {
       if (wsUrl == null || wsUrl.isEmpty) return null;
       return PairingPayload(
         wsUrl: wsUrl,
+        relayWsUrl: map['relayWsUrl'] as String?,
         relayPeerId: map['relayPeerId'] as String?,
         agentPeerId: map['agentPeerId'] as String?,
         agentPubKey: map['agentPubKey'] as String?,
