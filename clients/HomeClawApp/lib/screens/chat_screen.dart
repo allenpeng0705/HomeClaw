@@ -12,6 +12,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:homeclaw_native/homeclaw_native.dart';
 import 'package:homeclaw_voice/homeclaw_voice.dart';
 import 'package:file_picker/file_picker.dart';
+import '../widgets/core_origin_network_image.dart';
 import '../widgets/full_screen_image_page.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
@@ -3563,10 +3564,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     return RepaintBoundary(
       child: ClipRRect(
         borderRadius: BorderRadius.circular(8),
-        child: Image.network(
-          resolved,
+        child: CoreOriginNetworkImage(
+          coreService: widget.coreService,
+          imageUrl: resolved,
           width: w,
           fit: BoxFit.contain,
+          gaplessPlayback: true,
           headers:
               sameCorePath ? widget.coreService.coreMediaFetchHeaders : null,
           loadingBuilder: (c, child, prog) {
@@ -3589,7 +3592,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
               ),
             );
           },
-          errorBuilder: (_, __, ___) =>
+          errorPlaceholder: (_, __) =>
               Icon(Icons.broken_image_outlined, color: cs.outline, size: 40),
         ),
       ),
@@ -4244,6 +4247,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                                       imageRef: imageRef,
                                                       coreBaseUrl: widget
                                                           .coreService.baseUrl,
+                                                      companionCoreService:
+                                                          widget.coreService,
                                                       fetchHeaders: t
                                                               .startsWith('/')
                                                           ? widget.coreService
@@ -5189,11 +5194,13 @@ class _VideoPlayChip extends StatelessWidget {
 class _FullScreenImagePage extends StatelessWidget {
   final String imageRef;
   final String coreBaseUrl;
+  final CoreService? companionCoreService;
   final Map<String, String>? fetchHeaders;
 
   const _FullScreenImagePage({
     required this.imageRef,
     required this.coreBaseUrl,
+    this.companionCoreService,
     this.fetchHeaders,
   });
 
@@ -5201,6 +5208,7 @@ class _FullScreenImagePage extends StatelessWidget {
   Widget build(BuildContext context) => FullScreenImagePage(
         imageRef: imageRef,
         coreBaseUrl: coreBaseUrl,
+        companionCoreService: companionCoreService,
         fetchHeaders: fetchHeaders,
       );
 }

@@ -2,16 +2,23 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
+import '../core_service.dart';
+
+import 'core_origin_network_image.dart';
+
 /// Full-screen image viewer. Tap anywhere to go back.
 class FullScreenImagePage extends StatelessWidget {
   final String imageRef;
   final String coreBaseUrl;
   final Map<String, String>? fetchHeaders;
 
+  final CoreService? companionCoreService;
+
   const FullScreenImagePage({
     super.key,
     required this.imageRef,
     required this.coreBaseUrl,
+    this.companionCoreService,
     this.fetchHeaders,
   });
 
@@ -51,26 +58,46 @@ class FullScreenImagePage extends StatelessWidget {
         net = '$base$trimmed';
       }
       if (net != null) {
+        final viewerChild = companionCoreService != null
+            ? CoreOriginNetworkImage(
+                coreService: companionCoreService!,
+                imageUrl: net,
+                fit: BoxFit.contain,
+                headers: fetchHeaders,
+                gaplessPlayback: true,
+                loadingBuilder: (c, child, prog) {
+                  if (prog == null) return child;
+                  return const SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: CircularProgressIndicator(
+                        color: Colors.white54, strokeWidth: 2),
+                  );
+                },
+                errorPlaceholder: (_, __) => const Icon(Icons.broken_image,
+                    color: Colors.white54, size: 64),
+              )
+            : Image.network(
+                net,
+                fit: BoxFit.contain,
+                headers: fetchHeaders,
+                loadingBuilder: (c, child, prog) {
+                  if (prog == null) return child;
+                  return const SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: CircularProgressIndicator(
+                        color: Colors.white54, strokeWidth: 2),
+                  );
+                },
+                errorBuilder: (_, __, ___) => const Icon(Icons.broken_image,
+                    color: Colors.white54, size: 64),
+              );
         bodyChild = Center(
           child: InteractiveViewer(
             minScale: 0.5,
             maxScale: 4.0,
-            child: Image.network(
-              net,
-              fit: BoxFit.contain,
-              headers: fetchHeaders,
-              loadingBuilder: (c, child, prog) {
-                if (prog == null) return child;
-                return const SizedBox(
-                  width: 48,
-                  height: 48,
-                  child: CircularProgressIndicator(
-                      color: Colors.white54, strokeWidth: 2),
-                );
-              },
-              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image,
-                  color: Colors.white54, size: 64),
-            ),
+            child: viewerChild,
           ),
         );
       } else {

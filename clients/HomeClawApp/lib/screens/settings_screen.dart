@@ -35,6 +35,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final SettingsNotifier _settingsNotifier;
   /// Non-null after [_loadEnvoyP2pFields] when a QR pairing payload was saved.
   String? _envoyPairedHint;
+  bool _routeCoreHttpViaEnvoy = false;
 
   @override
   void initState() {
@@ -48,6 +49,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _execCommandController = TextEditingController();
     _envoyUrlController = TextEditingController(text: 'ws://192.168.1.100:3030/ws');
     if (widget.coreService.isLoggedIn) _loadMyAvatar();
+    _routeCoreHttpViaEnvoy = widget.coreService.useEnvoyCoreHttp;
     unawaited(_loadEnvoyP2pFields());
   }
 
@@ -176,6 +178,57 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
+  Future<void> _onRouteCoreHttpViaEnvoyChanged(bool want) async {
+    if (!mounted) return;
+    if (!want) {
+      setState(() => _routeCoreHttpViaEnvoy = false);
+      await widget.coreService.saveUseEnvoyCoreHttp(false);
+      return;
+    }
+    final envoy = ref.read(envoyNodeServiceProvider);
+    if (!envoy.isRelayConnected) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('Connect the Envoy relay first, then turn on Core HTTP routing.'),
+          ),
+        );
+      }
+      return;
+    }
+    final syntaxErr =
+        widget.coreService.validateCompanionCoreUrlSyntax(_urlController.text);
+    if (syntaxErr != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(syntaxErr)));
+      }
+      return;
+    }
+    final trimmedBase = _urlController.text.trim().replaceFirst(RegExp(r'/$'), '');
+    final baseParsed = Uri.parse(trimmedBase);
+    try {
+      await widget.coreService.probeEnvoyTunnelCoreReady(baseParsed);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Tunnel check failed: $e')),
+        );
+      }
+      return;
+    }
+    setState(() => _routeCoreHttpViaEnvoy = true);
+    await widget.coreService.saveUseEnvoyCoreHttp(true);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+            'Core HTTP routing via Envoy is on while the relay is connected.'),
+      ),
+    );
+  }
+
   Future<void> _clearChatHistories(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -252,6 +305,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
               keyboardType: TextInputType.url,
               autocorrect: false,
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Must match how your Core is addressed for API paths (host/port). Envoy routes by path/query; a wrong Core URL yields confusing failures even when relay works.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
             const SizedBox(height: 16),
             const Text(
@@ -554,6 +612,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 style: const TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ],
+            SwitchListTile(
+              title: const Text('Route Core HTTP via Envoy home node'),
+              subtitle: const Text(
+                'When enabled, Companion runs GET /ready via the relay on turn-on; normal JSON APIs tunnel first. Saves only after checks pass.',
+                style: TextStyle(fontSize: 12),
+              ),
+              value: _routeCoreHttpViaEnvoy,
+              onChanged: _onRouteCoreHttpViaEnvoyChanged,
+            ),
+            ExpansionTile(
+              title: const Text('When the phone still needs a reachable Core URL'),
+              childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              children: const [
+                Text(
+                  '• Off-LAN with routing on: SSE, multipart, and /ws are tunnelled through the home node when supported (SSE is buffered end-to-end — progress may arrive in one chunk).\n'
+                  '• Anything not on the Companion Core origin (different host/port/scheme) still needs the phone to reach that URL directly.\n'
+                  '• Chat inline images from this Core origin use CoreOriginNetworkImage with the relay when routing is on.',
+                  style: TextStyle(fontSize: 12, height: 1.35),
+                ),
+              ],
+            ),
             if (envoyState.initialized) ...[
               const SizedBox(height: 8),
               // Peer ID

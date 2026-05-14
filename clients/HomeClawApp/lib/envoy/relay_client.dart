@@ -74,8 +74,19 @@ void relayDispatchServerPush(
   Map<String, dynamic> msg, {
   void Function(Map<String, dynamic> envelope, String remotePeerId)? onEnvelope,
   void Function(Map<String, dynamic> data)? onBridgeStatus,
+  void Function(String text)? onHomeClawCoreWsText,
 }) {
   final event = msg['event'] as String?;
+  if (event == 'homeclawCoreWs:rx') {
+    final data = msg['data'];
+    if (data is Map) {
+      final t = data['text'];
+      if (t != null && t.toString().isNotEmpty) {
+        onHomeClawCoreWsText?.call(t.toString());
+      }
+    }
+    return;
+  }
   if (event == 'p2p:envelope') {
     final data = msg['data'] as Map<String, dynamic>?;
     if (data != null) {
@@ -149,6 +160,9 @@ class RelayClient {
   /// Called when the home node pushes `bridge:status` (bridge enabled/disabled, etc.).
   final void Function(Map<String, dynamic> data)? onBridgeStatus;
 
+  /// Core `/ws` text frames forwarded from the node (when using the Envoy tunnel WS).
+  final void Function(String text)? onHomeClawCoreWsText;
+
   RelayClient({
     required this.url,
     required this.peerId,
@@ -161,6 +175,7 @@ class RelayClient {
     this.onEnvelope,
     this.onStateChange,
     this.onBridgeStatus,
+    this.onHomeClawCoreWsText,
   })  : connectHeaders = (connectHeaders == null || connectHeaders.isEmpty)
             ? null
             : Map<String, dynamic>.from(connectHeaders),
@@ -232,6 +247,11 @@ class RelayClient {
 
   /// Disconnect and clean up.
   Future<void> disconnect() async {
+    if (_channel != null && _state == RelayClientState.connected) {
+      try {
+        await homeClawCoreWsClose(timeout: const Duration(seconds: 3));
+      } catch (_) {}
+    }
     _wantKeepalive = false;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
@@ -300,7 +320,7 @@ class RelayClient {
   }
 
   /// True when wire error looks like JSON-RPC `-32601` method not found.
-  static bool _looksLikeRpcMethodNotFound(Object e) {
+  static bool looksLikeRpcMethodNotFound(Object e) {
     if (e is TimeoutException) return false;
     final s = e.toString().toLowerCase();
     return s.contains('32601') ||
@@ -370,7 +390,7 @@ class RelayClient {
           return relayProbePayloadAsStatusMap(r, meth);
         } catch (e, st) {
           last = e;
-          if (_looksLikeRpcMethodNotFound(e)) continue outer;
+          if (looksLikeRpcMethodNotFound(e)) continue outer;
           // Relay dropped socket (or `_channel` cleared) mid-probe; next param style needs a fresh WS.
           final hasMoreParamStyles = pi + 1 < variants.length;
           if (hasMoreParamStyles &&
@@ -479,6 +499,7 @@ class RelayClient {
         msg,
         onEnvelope: onEnvelope,
         onBridgeStatus: onBridgeStatus,
+        onHomeClawCoreWsText: onHomeClawCoreWsText,
       );
       return;
     }
@@ -522,8 +543,9 @@ class RelayClient {
   /// list, null, etc., depending on the method.
   Future<dynamic> _rpc(
     String method,
-    Map<String, dynamic>? params,
-  ) async {
+    Map<String, dynamic>? params, {
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
     if (_channel == null) throw StateError('not connected');
     // String wire ids: some home-node relays reject numeric JSON-RPC `id` values.
     final idStr = '${_nextRpcId++}';
@@ -533,7 +555,7 @@ class RelayClient {
     _pending[corr] = completer;
     _sendJson(request);
     return completer.future.timeout(
-      const Duration(seconds: 30),
+      timeout,
       onTimeout: () {
         _pending.remove(corr);
         throw TimeoutException('RPC $method timed out');
@@ -544,6 +566,104 @@ class RelayClient {
   // ============================================
   // Public API
   // ============================================
+
+  /// Packed HTTP to HomeClaw Core on the home LAN via `homeclawCoreProxy` on the node.
+  Future<Map<String, dynamic>> homeclawCoreProxy({
+    required String method,
+    required String pathWithQuery,
+    Map<String, String>? headers,
+    List<int>? bodyBytes,
+    Duration timeout = const Duration(seconds: 120),
+  }) async {
+    final norm = pathWithQuery.trim();
+    final path = norm.startsWith('/') ? norm : '/$norm';
+    final params = <String, dynamic>{
+      'method': method,
+      'path': path,
+      if (headers != null && headers.isNotEmpty) 'headers': headers,
+      if (bodyBytes != null && bodyBytes.isNotEmpty) 'bodyBase64': base64Encode(bodyBytes),
+      'timeoutMs': timeout.inMilliseconds.clamp(1000, 14400 * 1000),
+    };
+    Object? last;
+    for (final meth in ['homeclawCoreProxy', 'homeclaw_core_proxy']) {
+      try {
+        final r = await _rpc(meth, params, timeout: timeout);
+        if (r is Map<String, dynamic>) return r;
+        if (r is Map) return Map<String, dynamic>.from(r);
+        throw StateError('homeclawCoreProxy: unexpected result type ${r.runtimeType}');
+      } catch (e) {
+        last = e;
+        if (meth == 'homeclawCoreProxy' && looksLikeRpcMethodNotFound(e)) continue;
+        rethrow;
+      }
+    }
+    throw StateError('homeclawCoreProxy failed (${last ?? 'unknown'})');
+  }
+
+  /// Open an Envoy-mediated WebSocket tunnel to Core `/ws` (node dials LAN Core).
+  Future<Map<String, dynamic>> homeClawCoreWsOpen({
+    required String pathWithQuery,
+    Duration timeout = const Duration(seconds: 45),
+  }) async {
+    final pq = pathWithQuery.trim().startsWith('/')
+        ? pathWithQuery.trim()
+        : '/${pathWithQuery.trim()}';
+    final params = <String, dynamic>{'pathWithQuery': pq};
+    Object? last;
+    for (final meth in ['homeClawCoreWsOpen', 'home_claw_core_ws_open']) {
+      try {
+        final r = await _rpc(meth, params, timeout: timeout);
+        if (r is Map<String, dynamic>) return r;
+        if (r is Map) return Map<String, dynamic>.from(r);
+        throw StateError('homeClawCoreWsOpen: unexpected result type ${r.runtimeType}');
+      } catch (e) {
+        last = e;
+        if (meth == 'homeClawCoreWsOpen' && looksLikeRpcMethodNotFound(e)) continue;
+        rethrow;
+      }
+    }
+    throw StateError('homeClawCoreWsOpen failed (${last ?? 'unknown'})');
+  }
+
+  /// Send a UTF-8 text frame on the Core WS tunnel opened by [homeClawCoreWsOpen].
+  Future<Map<String, dynamic>> homeClawCoreWsSend({
+    required String text,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final params = <String, dynamic>{'text': text};
+    Object? last;
+    for (final meth in ['homeClawCoreWsSend', 'home_claw_core_ws_send']) {
+      try {
+        final r = await _rpc(meth, params, timeout: timeout);
+        if (r is Map<String, dynamic>) return r;
+        if (r is Map) return Map<String, dynamic>.from(r);
+        throw StateError('homeClawCoreWsSend: unexpected result type ${r.runtimeType}');
+      } catch (e) {
+        last = e;
+        if (meth == 'homeClawCoreWsSend' && looksLikeRpcMethodNotFound(e)) continue;
+        rethrow;
+      }
+    }
+    throw StateError('homeClawCoreWsSend failed (${last ?? 'unknown'})');
+  }
+
+  /// Close Core `/ws` tunnel on the node.
+  Future<void> homeClawCoreWsClose({
+    Duration timeout = const Duration(seconds: 6),
+  }) async {
+    if (_channel == null || _state != RelayClientState.connected) return;
+    for (final meth in ['homeClawCoreWsClose', 'home_claw_core_ws_close']) {
+      try {
+        await _rpc(meth, null, timeout: timeout);
+        return;
+      } catch (e) {
+        if (meth == 'homeClawCoreWsClose' && looksLikeRpcMethodNotFound(e)) {
+          continue;
+        }
+        return;
+      }
+    }
+  }
 
   /// Forward a pre-signed envelope into the P2P mesh.
   ///
@@ -561,7 +681,7 @@ class RelayClient {
       await _rpc('forwardEnvelope', params);
       return;
     } catch (e) {
-      if (!_looksLikeRpcMethodNotFound(e)) rethrow;
+      if (!looksLikeRpcMethodNotFound(e)) rethrow;
     }
     await _rpc('forward_envelope', params);
   }
@@ -608,7 +728,7 @@ class RelayClient {
       if (r is Map) return Map<String, dynamic>.from(r);
       throw StateError('getBridgeStatus: unexpected result type ${r.runtimeType}');
     } catch (e) {
-      if (!_looksLikeRpcMethodNotFound(e)) rethrow;
+      if (!looksLikeRpcMethodNotFound(e)) rethrow;
     }
     final r = await _rpc('get_bridge_status', null);
     if (r is Map<String, dynamic>) return r;
@@ -641,7 +761,7 @@ class RelayClient {
         );
       } catch (e) {
         last = e;
-        if (_looksLikeRpcMethodNotFound(e)) continue;
+        if (looksLikeRpcMethodNotFound(e)) continue;
         rethrow;
       }
     }
@@ -656,7 +776,7 @@ class RelayClient {
       if (r is Map) return Map<String, dynamic>.from(r);
       throw StateError('getNodeConfig: unexpected result type ${r.runtimeType}');
     } catch (e) {
-      if (!_looksLikeRpcMethodNotFound(e)) rethrow;
+      if (!looksLikeRpcMethodNotFound(e)) rethrow;
     }
     final r = await _rpc('get_node_config', null);
     if (r is Map<String, dynamic>) return r;
@@ -676,7 +796,7 @@ class RelayClient {
       r = await _rpc('getBonds', null);
       return _normalizeBondsResult(r);
     } catch (e) {
-      if (!_looksLikeRpcMethodNotFound(e)) rethrow;
+      if (!looksLikeRpcMethodNotFound(e)) rethrow;
     }
     r = await _rpc('get_bonds', null);
     return _normalizeBondsResult(r);

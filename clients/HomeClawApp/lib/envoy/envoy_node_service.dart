@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../chat_history_store.dart';
@@ -180,9 +181,15 @@ class EnvoyNodeService {
   final StreamController<Map<String, dynamic>> _bridgeStatusController =
       StreamController<Map<String, dynamic>>.broadcast();
 
+  final StreamController<String> _homeClawCoreWsTextController =
+      StreamController<String>.broadcast();
+
   /// Home node `bridge:status` push events (same payload as periodic [discoverBridgeAgent] source).
   Stream<Map<String, dynamic>> get onBridgeStatusFromNode =>
       _bridgeStatusController.stream;
+
+  /// Forwarded UTF-8 text frames from Core `/ws` via the Envoy home node tunnel.
+  Stream<String> get onHomeClawCoreWsText => _homeClawCoreWsTextController.stream;
 
   // ============================================
   // Identity lifecycle
@@ -271,6 +278,11 @@ class EnvoyNodeService {
         pairingProbeToken: pairingWsToken,
         pairingRelayPeerId: pairingRelayPeerId,
         onEnvelope: _handleInboundEnvelope,
+        onHomeClawCoreWsText: (t) {
+          if (!_homeClawCoreWsTextController.isClosed) {
+            _homeClawCoreWsTextController.add(t);
+          }
+        },
         onStateChange: (state) {
           _statusChangeController.add(state);
         },
@@ -560,6 +572,92 @@ class EnvoyNodeService {
     );
   }
 
+  /// True when the WebSocket to the home node is connected.
+  bool get isRelayConnected =>
+      _client != null && _client!.state == RelayClientState.connected;
+
+  /// Single HTTP round-trip to Core via the node's `homeclawCoreProxy` RPC.
+  ///
+  /// [body] must be [String] (UTF-8) or [List<int>] when set.
+  Future<http.Response> homeclawCoreHttpViaRelay({
+    required String method,
+    required Uri fullUri,
+    required Map<String, String> headers,
+    Duration? timeout,
+    Object? body,
+  }) async {
+    _requireConnected();
+    List<int>? bytes;
+    if (body is String) {
+      bytes = utf8.encode(body);
+    } else if (body is List<int>) {
+      bytes = body;
+    } else if (body != null) {
+      throw ArgumentError('homeclawCoreHttpViaRelay: body must be String or List<int>');
+    }
+    if (bytes != null && bytes.isEmpty) bytes = null;
+
+    final pq = '${fullUri.path}${fullUri.hasQuery ? '?${fullUri.query}' : ''}';
+    final pathWithQuery = pq.isEmpty ? '/' : (pq.startsWith('/') ? pq : '/$pq');
+    final t = timeout ?? const Duration(seconds: 120);
+
+    final map = await _client!.homeclawCoreProxy(
+      method: method,
+      pathWithQuery: pathWithQuery,
+      headers: headers,
+      bodyBytes: bytes,
+      timeout: t,
+    );
+
+    final status = (map['status'] as num?)?.toInt() ?? 599;
+    final headersRaw = map['headers'];
+    final hdr = <String, String>{};
+    if (headersRaw is Map) {
+      for (final e in headersRaw.entries) {
+        hdr['${e.key}'] = '${e.value}';
+      }
+    }
+    final err = map['error'] as String?;
+    Uint8List bodyOut = Uint8List(0);
+    final bb = map['bodyBase64'] as String?;
+    if (bb != null && bb.isNotEmpty) {
+      try {
+        bodyOut = Uint8List.fromList(base64Decode(bb));
+      } catch (_) {
+        bodyOut = Uint8List(0);
+      }
+    } else if (err != null && err.isNotEmpty && bodyOut.isEmpty) {
+      bodyOut = Uint8List.fromList(utf8.encode(err));
+    }
+    return http.Response.bytes(bodyOut, status, headers: hdr);
+  }
+
+  /// Open the node→Core `/ws` tunnel (see [RelayClient.homeClawCoreWsOpen]).
+  Future<Map<String, dynamic>> homeClawCoreWsOpen({
+    required String pathWithQuery,
+    Duration timeout = const Duration(seconds: 45),
+  }) async {
+    _requireConnected();
+    return _client!.homeClawCoreWsOpen(
+      pathWithQuery: pathWithQuery,
+      timeout: timeout,
+    );
+  }
+
+  /// Send a UTF-8 text frame on the open Core `/ws` tunnel.
+  Future<Map<String, dynamic>> homeClawCoreWsSend({
+    required String text,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    _requireConnected();
+    return _client!.homeClawCoreWsSend(text: text, timeout: timeout);
+  }
+
+  /// Close the Core `/ws` tunnel on the paired home node.
+  Future<void> homeClawCoreWsClose() async {
+    await _client?.homeClawCoreWsClose();
+  }
+
   /// Get bonded contacts from the home node.
   ///
   /// Calls `getBonds` JSON-RPC and converts each bond to an
@@ -646,6 +744,9 @@ class EnvoyNodeService {
     } catch (_) {}
     try {
       await _bridgeStatusController.close();
+    } catch (_) {}
+    try {
+      await _homeClawCoreWsTextController.close();
     } catch (_) {}
   }
 }

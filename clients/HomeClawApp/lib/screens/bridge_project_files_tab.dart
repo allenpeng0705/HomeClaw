@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../core_service.dart';
+import '../widgets/core_origin_network_image.dart';
 import '../providers/bridge_project_providers.dart';
 import '../utils/file_preview_utils.dart';
 
@@ -371,10 +372,12 @@ class _BridgeProjectFilesExplorerState extends ConsumerState<BridgeProjectFilesE
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: Image.network(
-                snap.data!,
+              child: CoreOriginNetworkImage(
+                coreService: widget.coreService,
+                imageUrl: snap.data!,
                 fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) =>
+                headers: widget.coreService.coreMediaFetchHeaders,
+                errorPlaceholder: (_, __) =>
                     const Text('Could not load image'),
               ),
             ),
@@ -642,10 +645,12 @@ class _BridgeFilePreviewPageState extends ConsumerState<_BridgeFilePreviewPage> 
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: Image.network(
-                snap.data!,
+              child: CoreOriginNetworkImage(
+                coreService: widget.coreService,
+                imageUrl: snap.data!,
                 fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) =>
+                headers: widget.coreService.coreMediaFetchHeaders,
+                errorPlaceholder: (_, __) =>
                     const Text('Could not load image'),
               ),
             ),

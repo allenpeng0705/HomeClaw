@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../core_service.dart';
+import '../widgets/core_origin_network_image.dart';
 import '../providers/finder_files_providers.dart';
 import '../utils/file_preview_utils.dart';
 
@@ -268,11 +269,12 @@ class _FinderFilesExplorerState extends ConsumerState<FinderFilesExplorer> {
         padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: Image.network(
-            uri.toString(),
-            headers: headers,
+          child: CoreOriginNetworkImage(
+            coreService: widget.coreService,
+            imageUrl: uri.toString(),
             fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => const Text('Could not load image'),
+            headers: headers,
+            errorPlaceholder: (_, __) => const Text('Could not load image'),
           ),
         ),
       );
@@ -508,11 +510,12 @@ class _FinderFilePreviewPageState extends ConsumerState<_FinderFilePreviewPage> 
         padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: Image.network(
-            uri.toString(),
-            headers: headers,
+          child: CoreOriginNetworkImage(
+            coreService: widget.coreService,
+            imageUrl: uri.toString(),
             fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => const Text('Could not load image'),
+            headers: headers,
+            errorPlaceholder: (_, __) => const Text('Could not load image'),
           ),
         ),
       );

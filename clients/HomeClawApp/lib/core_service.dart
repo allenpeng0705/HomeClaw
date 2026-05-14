@@ -12,13 +12,19 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'chat_history_store.dart';
+import 'envoy/envoy_node_service.dart';
+import 'envoy/relay_client.dart';
 export 'models/core_service_models.dart';
 import 'models/core_service_models.dart';
 import 'federation_e2e_crypto.dart';
 import 'node_service.dart';
+
+/// Envoy `homeclawCoreProxy` timeout bucket (Companion ↔ node JSON-RPC wait).
+enum _CompanionTunnelCapKind { shortLived, multipart, longInbound }
 
 /// Parse JSON error bodies from Core (and nested peer `detail`) for user-visible messages.
 String _formatCoreApiError(String body, int statusCode) {
@@ -80,6 +86,7 @@ class CoreService {
   static const String _keyCompanionDeviceId = 'companion_device_id';
   static const String _keyPortalAdminToken = 'portal_admin_token';
   static const String _keyPendingInboundPrefix = 'pending_inbound_';
+  static const String _keyUseEnvoyCoreHttp = 'core_http_via_envoy';
   static const String _defaultBaseUrl = 'http://127.0.0.1:9000';
 
   String _baseUrl = _defaultBaseUrl;
@@ -101,6 +108,9 @@ class CoreService {
   String? _clawcodeWebUiUrl;
   String? _portalAdminToken;
 
+  EnvoyNodeService? _envoyForCoreHttp;
+  bool _useEnvoyCoreHttp = false;
+
   String get baseUrl => _baseUrl;
   String? get portalAdminToken => _portalAdminToken;
   bool get showProgressDuringLongTasks => _showProgressDuringLongTasks;
@@ -119,6 +129,123 @@ class CoreService {
   List<String> get execAllowlist => List.unmodifiable(_execAllowlist);
   String? get canvasUrl => _canvasUrl;
   String? get nodesUrl => _nodesUrl;
+
+  /// When true (and EnvoyMesh relay is connected), simple Core HTTP is routed via the paired home node's `homeclawCoreProxy`.
+  bool get useEnvoyCoreHttp => _useEnvoyCoreHttp;
+
+  /// True when Companion is configured for relay routing and the Envoy WebSocket is connected.
+  bool get coreHttpTunnelActive =>
+      _useEnvoyCoreHttp && (_envoyForCoreHttp?.isRelayConnected ?? false);
+
+  /// Test-only: handshake wait for Core `/ws` (direct or Envoy tunnel). Reset to null after tests.
+  @visibleForTesting
+  static Duration? testOverrideCoreWsHandshakeTimeout;
+
+  static Duration _coreWsHandshakeTimeoutResolved() =>
+      testOverrideCoreWsHandshakeTimeout ?? const Duration(seconds: 10);
+
+  @visibleForTesting
+  Future<void> testEnsureCoreWsConnectedForCompanion([String? userId]) =>
+      _ensureCoreWsConnected(userId);
+
+  @visibleForTesting
+  bool get testDebugCoreWsUsesCompanionTunnel => _coreWsUsesCompanionTunnel;
+
+  @visibleForTesting
+  String? get testDebugCoreWsSessionId => _coreWsSessionId;
+
+  @visibleForTesting
+  Future<void> testTearDownCoreWebSocketForCompanion() => _tearDownCoreWebSocket();
+
+  /// Ports [Uri.port] resolves to before comparing origins (explicit or scheme default).
+  static int companionEffectiveUriPort(Uri u) {
+    if (u.hasPort) return u.port;
+    if (u.scheme == 'https') return 443;
+    if (u.scheme == 'http') return 80;
+    return 0;
+  }
+
+  /// Simple validation for the Core URL text field ([null] = OK).
+  String? validateCompanionCoreUrlSyntax(String raw) {
+    final t = raw.trim().replaceFirst(RegExp(r'/$'), '');
+    if (t.isEmpty) return 'Enter a Core base URL.';
+    final u = Uri.tryParse(t);
+    if (u == null || !u.hasScheme) return 'Invalid URL.';
+    if (u.scheme != 'http' && u.scheme != 'https') {
+      return 'Use http:// or https://.';
+    }
+    if (u.host.isEmpty) return 'URL must include a host.';
+    return null;
+  }
+
+  /// True when [candidate] is the same origin as Companion's configured [_baseUrl] (scheme/host/port).
+  bool isSameCoreOriginAsCompanion(Uri candidate) {
+    final trimmed = _baseUrl.trim().replaceFirst(RegExp(r'/$'), '');
+    final b = Uri.tryParse(trimmed);
+    if (b == null || !b.hasScheme || b.host.isEmpty) return false;
+    if (!candidate.hasScheme || candidate.host.isEmpty) return false;
+    if (b.scheme != candidate.scheme) return false;
+    if (b.host.toLowerCase() != candidate.host.toLowerCase()) return false;
+    if (companionEffectiveUriPort(b) != companionEffectiveUriPort(candidate)) {
+      return false;
+    }
+    return true;
+  }
+
+  /// GET /ready via the Envoy HTTP tunnel — confirms relay + node's `homeclawCoreProxy` + Core connectivity.
+  Future<void> probeEnvoyTunnelCoreReady(Uri companionBase) async {
+    if (!companionBase.hasScheme || companionBase.authority.isEmpty) {
+      throw ArgumentError.value(companionBase, 'companionBase', 'needs scheme and host');
+    }
+    final envoy = _envoyForCoreHttp;
+    const timeout = Duration(seconds: 25);
+    if (envoy == null || !envoy.isRelayConnected) {
+      throw StateError('Envoy relay is not connected.');
+    }
+    if (timeout > _companionTunnelMaxShort) {
+      throw StateError('Probe timeout exceeds relay proxy limits.');
+    }
+    final readyUri =
+        Uri.parse('${companionBase.scheme}://${companionBase.authority}/ready');
+    final response = await envoy.homeclawCoreHttpViaRelay(
+      method: 'GET',
+      fullUri: readyUri,
+      headers: const <String, String>{},
+      timeout: timeout,
+    );
+    if (response.statusCode != 200) {
+      throw StateError(
+          'GET /ready via tunnel returned HTTP ${response.statusCode} (Companion Core URL paths must match what the home node proxies).',
+      );
+    }
+  }
+
+  /// Loads bytes for URLs on Companion's configured Core origin when [coreHttpTunnelActive] (tunnel-first).
+  ///
+  /// For thread/file previews when the phone cannot reach Core on LAN but the relay tunnel can.
+  Future<Uint8List?> fetchTunnelRoutedCoreMediaBytes(Uri absoluteUrl) async {
+    if (!coreHttpTunnelActive || !isSameCoreOriginAsCompanion(absoluteUrl)) {
+      return null;
+    }
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: absoluteUrl,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 120),
+    );
+    if (response.statusCode != 200) return null;
+    return response.bodyBytes;
+  }
+
+  void bindEnvoyForCoreHttp(EnvoyNodeService? envoy) {
+    _envoyForCoreHttp = envoy;
+  }
+
+  Future<void> saveUseEnvoyCoreHttp(bool value) async {
+    _useEnvoyCoreHttp = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyUseEnvoyCoreHttp, value);
+  }
 
   NodeService? _nodeService;
   NodeService? get nodeService => _nodeService;
@@ -144,6 +271,8 @@ class CoreService {
   String? _coreWsRegisteredUserId; // user_id we last sent in register; re-register when current message's userId differs
   Timer? _coreWsPingTimer; // keepalive: send ping so proxies don't close the connection
   static const Duration _coreWsPingInterval = Duration(seconds: 30);
+  bool _coreWsUsesCompanionTunnel = false;
+  StreamSubscription<String>? _coreWsCompanionTunnelSubscription;
   final Map<String, Completer<Map<String, dynamic>>> _pendingInboundResult = {};
   /// request_id -> (userId, friendId) so when inbound_result arrives we can route to the correct chat.
   final Map<String, ({String userId, String friendId})> _pendingRequestMeta = {};
@@ -278,18 +407,19 @@ class CoreService {
     if (_sessionUserId != null && _sessionUserId!.isEmpty) _sessionUserId = null;
     _portalAdminToken = prefs.getString(_keyPortalAdminToken)?.trim();
     if (_portalAdminToken != null && _portalAdminToken!.isEmpty) _portalAdminToken = null;
+    _useEnvoyCoreHttp = prefs.getBool(_keyUseEnvoyCoreHttp) ?? false;
   }
 
   /// POST /api/portal/auth with Portal admin username/password. Returns token. Throws on 401/503/network.
   Future<String> postPortalAuth({required String username, required String password}) async {
     final url = Uri.parse('$_baseUrl/api/portal/auth');
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'username': username.trim(), 'password': password}),
-        )
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'username': username.trim(), 'password': password}),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode == 401) {
       throw Exception('Invalid username or password');
     }
@@ -372,13 +502,13 @@ class CoreService {
     String? lastError;
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
-        final response = await http
-            .post(
-              url,
-              headers: {'Content-Type': 'application/json', ..._authHeaders()},
-              body: jsonEncode({'username': username.trim(), 'password': password}),
-            )
-            .timeout(const Duration(seconds: 20));
+        final response = await _coreHttpViaEnvoyOrDirect(
+          method: 'POST',
+          uri: url,
+          headers: {'Content-Type': 'application/json', ..._authHeaders()},
+          body: jsonEncode({'username': username.trim(), 'password': password}),
+          timeout: const Duration(seconds: 20),
+        );
         if (response.statusCode != 200) {
           final body = (response.body).trim();
           String detail = '';
@@ -423,9 +553,12 @@ class CoreService {
   /// GET /api/me with Bearer token. Returns {user_id, name, friends}. 401 if token invalid.
   Future<Map<String, dynamic>> getMe() async {
     final url = Uri.parse('$_baseUrl/api/me');
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 10));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 10),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -442,9 +575,12 @@ class CoreService {
   /// GET /api/me/friends with Bearer token. Returns {friends: [...]}. 401 if token invalid.
   Future<List<Map<String, dynamic>>> getFriends() async {
     final url = Uri.parse('$_baseUrl/api/me/friends');
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 10));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 10),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -484,7 +620,12 @@ class CoreService {
 
   Future<Map<String, dynamic>> getFederationE2eKeyStatus() async {
     final url = Uri.parse('$_baseUrl/api/me/federation-e2e-key-status');
-    final response = await http.get(url, headers: _authHeaders(forCompanionApi: true)).timeout(const Duration(seconds: 10));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 10),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -501,13 +642,13 @@ class CoreService {
 
   Future<void> putFederationE2ePublicKey(String publicKeyB64) async {
     final url = Uri.parse('$_baseUrl/api/me/federation-e2e-key');
-    final response = await http
-        .put(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
-          body: jsonEncode({'public_key_b64': publicKeyB64.trim()}),
-        )
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'PUT',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: jsonEncode({'public_key_b64': publicKeyB64.trim()}),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -528,7 +669,12 @@ class CoreService {
         'remote_user_id': remoteUserId.trim(),
       },
     );
-    final response = await http.get(url, headers: _authHeaders(forCompanionApi: true)).timeout(const Duration(seconds: 20));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 20),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -574,7 +720,12 @@ class CoreService {
   Future<Uint8List?> fetchAvatarWithAuth(String url) async {
     try {
       final uri = Uri.parse(url);
-      final response = await http.get(uri, headers: _authHeaders(forCompanionApi: true)).timeout(const Duration(seconds: 10));
+      final response = await _coreHttpViaEnvoyOrDirect(
+        method: 'GET',
+        uri: uri,
+        headers: _authHeaders(forCompanionApi: true),
+        timeout: const Duration(seconds: 10),
+      );
       if (response.statusCode != 200) return null;
       return response.bodyBytes;
     } catch (_) {
@@ -634,11 +785,13 @@ class CoreService {
       'old_password': oldPassword,
       'new_password': newPassword,
     });
-    final response = await http.put(
-      url,
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'PUT',
+      uri: url,
       headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
       body: body,
-    ).timeout(const Duration(seconds: 15));
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode != 200) {
       String msg = 'Password change failed';
       try {
@@ -653,12 +806,20 @@ class CoreService {
   Future<void> uploadMyAvatar(File file) async {
     if (!await file.exists()) throw Exception('File not found');
     final url = Uri.parse('$_baseUrl/api/me/avatar');
-    final request = http.MultipartRequest('PUT', url);
-    request.headers.addAll(_authHeaders(forCompanionApi: true));
-    request.files.add(await http.MultipartFile.fromPath('file', file.path, filename: path.basename(file.path)));
-    final streamed = await request.send().timeout(const Duration(seconds: 15));
-    final response = await http.Response.fromStream(streamed);
-    if (response.statusCode != 200) throw Exception(response.body.isNotEmpty ? response.body : 'Upload failed ${response.statusCode}');
+    final timeout = const Duration(seconds: 15);
+    final response = await _multipartResponseWithTunnelFallback(
+      build: () async {
+        final request = http.MultipartRequest('PUT', url);
+        request.headers.addAll(_authHeaders(forCompanionApi: true));
+        request.files
+            .add(await http.MultipartFile.fromPath('file', file.path, filename: path.basename(file.path)));
+        return request;
+      },
+      timeout: timeout,
+    );
+    if (response.statusCode != 200) {
+      throw Exception(response.body.isNotEmpty ? response.body : 'Upload failed ${response.statusCode}');
+    }
   }
 
   /// POST /api/me/friends — add a custom AI friend (name, relation?, who?, identity text?). Persisted to user.yml.
@@ -675,11 +836,13 @@ class CoreService {
     if (relation != null && relation.trim().isNotEmpty) body['relation'] = relation.trim();
     if (who != null && who.isNotEmpty) body['who'] = who;
     if (preset != null && preset.trim().isNotEmpty) body['preset'] = preset.trim();
-    final response = await http.post(
-      url,
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
       headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
       body: jsonEncode(body),
-    ).timeout(const Duration(seconds: 15));
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode != 200) throw Exception(response.body.isNotEmpty ? response.body : 'Add AI friend failed');
     String friendId = name.trim();
     try {
@@ -704,11 +867,13 @@ class CoreService {
     if (name != null && name.trim().isNotEmpty) body['name'] = name.trim();
     if (relation != null) body['relation'] = relation;
     if (who != null) body['who'] = who;
-    final response = await http.patch(
-      url,
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'PATCH',
+      uri: url,
       headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
       body: jsonEncode(body),
-    ).timeout(const Duration(seconds: 15));
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode != 200 && response.statusCode != 404) throw Exception(response.body.isNotEmpty ? response.body : 'Update failed');
     if (identityText != null && identityText.trim().isNotEmpty) await setFriendIdentity(fid, identityText.trim());
   }
@@ -718,18 +883,25 @@ class CoreService {
     final fid = friendId.trim();
     if (fid.isEmpty) throw Exception('friend_id required');
     final url = Uri.parse('$_baseUrl/api/me/friends/${Uri.encodeComponent(fid)}');
-    final response = await http.delete(url, headers: _authHeaders(forCompanionApi: true)).timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'DELETE',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode != 200) throw Exception(response.body.isNotEmpty ? response.body : 'Delete failed');
   }
 
   /// PUT /api/me/friends/{friend_id}/identity — set identity file content for an AI friend.
   Future<void> setFriendIdentity(String friendId, String content) async {
     final url = Uri.parse('$_baseUrl/api/me/friends/${Uri.encodeComponent(friendId.trim())}/identity');
-    final response = await http.put(
-      url,
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'PUT',
+      uri: url,
       headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
       body: jsonEncode({'content': content}),
-    ).timeout(const Duration(seconds: 15));
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode != 200) throw Exception(response.body.isNotEmpty ? response.body : 'Set identity failed');
   }
 
@@ -737,12 +909,20 @@ class CoreService {
   Future<void> uploadFriendAvatar(String friendId, File file) async {
     if (!await file.exists()) throw Exception('File not found');
     final url = Uri.parse('$_baseUrl/api/me/friends/${Uri.encodeComponent(friendId.trim())}/avatar');
-    final request = http.MultipartRequest('PUT', url);
-    request.headers.addAll(_authHeaders(forCompanionApi: true));
-    request.files.add(await http.MultipartFile.fromPath('file', file.path, filename: path.basename(file.path)));
-    final streamed = await request.send().timeout(const Duration(seconds: 15));
-    final response = await http.Response.fromStream(streamed);
-    if (response.statusCode != 200) throw Exception(response.body.isNotEmpty ? response.body : 'Upload failed');
+    final timeout = const Duration(seconds: 15);
+    final response = await _multipartResponseWithTunnelFallback(
+      build: () async {
+        final request = http.MultipartRequest('PUT', url);
+        request.headers.addAll(_authHeaders(forCompanionApi: true));
+        request.files
+            .add(await http.MultipartFile.fromPath('file', file.path, filename: path.basename(file.path)));
+        return request;
+      },
+      timeout: timeout,
+    );
+    if (response.statusCode != 200) {
+      throw Exception(response.body.isNotEmpty ? response.body : 'Upload failed');
+    }
   }
 
   /// POST /api/user-message — send a message to another user (user-to-user). Uses API key auth.
@@ -774,13 +954,13 @@ class CoreService {
     final timeoutSec = hasHeavyMedia ? 120 : 30;
     late http.Response response;
     try {
-      response = await http
-          .post(
-            url,
-            headers: {'Content-Type': 'application/json', ..._authHeaders()},
-            body: jsonEncode(body),
-          )
-          .timeout(Duration(seconds: timeoutSec));
+      response = await _coreHttpViaEnvoyOrDirect(
+        method: 'POST',
+        uri: url,
+        headers: {'Content-Type': 'application/json', ..._authHeaders()},
+        body: jsonEncode(body),
+        timeout: Duration(seconds: timeoutSec),
+      );
     } on TimeoutException {
       throw Exception(
         'User message timed out after ${timeoutSec}s. Try again, shorten the message, or reduce attachment size.',
@@ -805,9 +985,12 @@ class CoreService {
   /// GET /api/users — list users (id, name) excluding current user. Uses Bearer token. For Add Friend screen.
   Future<List<Map<String, dynamic>>> getUsers() async {
     final url = Uri.parse('$_baseUrl/api/users');
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode != 200) {
       throw Exception('GET /api/users failed: ${response.statusCode} ${response.body}');
     }
@@ -818,9 +1001,12 @@ class CoreService {
   /// GET /api/friend-requests — pending requests for current user. Uses Bearer token.
   Future<List<Map<String, dynamic>>> getFriendRequests() async {
     final url = Uri.parse('$_baseUrl/api/friend-requests');
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode != 200) {
       throw Exception('GET /api/friend-requests failed: ${response.statusCode} ${response.body}');
     }
@@ -833,13 +1019,13 @@ class CoreService {
     final url = Uri.parse('$_baseUrl/api/friend-request');
     final body = <String, dynamic>{'to_user_id': toUserId.trim()};
     if (message != null && message.trim().isNotEmpty) body['message'] = message.trim();
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
-          body: jsonEncode(body),
-        )
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: jsonEncode(body),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode != 200) {
       throw Exception(response.body.isNotEmpty ? response.body : 'Send request failed ${response.statusCode}');
     }
@@ -848,13 +1034,13 @@ class CoreService {
   /// POST /api/friend-request/accept — accept request by [requestId]. Uses Bearer token.
   Future<void> acceptFriendRequest(String requestId) async {
     final url = Uri.parse('$_baseUrl/api/friend-request/accept');
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
-          body: jsonEncode({'request_id': requestId.trim()}),
-        )
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: jsonEncode({'request_id': requestId.trim()}),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode != 200) {
       throw Exception(response.body.isNotEmpty ? response.body : 'Accept failed ${response.statusCode}');
     }
@@ -863,13 +1049,13 @@ class CoreService {
   /// POST /api/friend-request/reject — reject request by [requestId]. Uses Bearer token.
   Future<void> rejectFriendRequest(String requestId) async {
     final url = Uri.parse('$_baseUrl/api/friend-request/reject');
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
-          body: jsonEncode({'request_id': requestId.trim()}),
-        )
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: jsonEncode({'request_id': requestId.trim()}),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode != 200) {
       throw Exception(response.body.isNotEmpty ? response.body : 'Reject failed ${response.statusCode}');
     }
@@ -878,9 +1064,12 @@ class CoreService {
   /// GET /api/federated-friend-requests — pending cross-instance requests. Requires federation_enabled on Core.
   Future<List<Map<String, dynamic>>> getFederatedFriendRequests() async {
     final url = Uri.parse('$_baseUrl/api/federated-friend-requests');
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -904,13 +1093,13 @@ class CoreService {
       'peer_instance_id': peerInstanceId.trim(),
     };
     if (message != null && message.trim().isNotEmpty) body['message'] = message.trim();
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
-          body: jsonEncode(body),
-        )
-        .timeout(const Duration(seconds: 20));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: jsonEncode(body),
+      timeout: const Duration(seconds: 20),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -922,13 +1111,13 @@ class CoreService {
 
   Future<void> acceptFederatedFriendRequest(String requestId) async {
     final url = Uri.parse('$_baseUrl/api/federated-friend-request/accept');
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
-          body: jsonEncode({'request_id': requestId.trim()}),
-        )
-        .timeout(const Duration(seconds: 20));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: jsonEncode({'request_id': requestId.trim()}),
+      timeout: const Duration(seconds: 20),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -940,13 +1129,13 @@ class CoreService {
 
   Future<void> rejectFederatedFriendRequest(String requestId) async {
     final url = Uri.parse('$_baseUrl/api/federated-friend-request/reject');
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
-          body: jsonEncode({'request_id': requestId.trim()}),
-        )
-        .timeout(const Duration(seconds: 20));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: jsonEncode({'request_id': requestId.trim()}),
+      timeout: const Duration(seconds: 20),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -963,9 +1152,12 @@ class CoreService {
       'limit': limit.toString(),
       'offset': offset.toString(),
     });
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode != 200) {
       throw Exception('GET /api/chat-history failed: ${response.statusCode} ${response.body}');
     }
@@ -993,9 +1185,12 @@ class CoreService {
     };
     final url = Uri.parse('$_baseUrl/api/user-inbox/thread').replace(queryParameters: query);
     // Thread payloads can be large (inlined media from Core); allow more than default API timeout.
-    final response = await http
-        .get(url, headers: _authHeaders())
-        .timeout(const Duration(seconds: 60));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 60),
+    );
     if (response.statusCode != 200) {
       throw Exception('GET thread failed ${response.statusCode}: ${response.body}');
     }
@@ -1017,9 +1212,12 @@ class CoreService {
       'other_user_id': otherUserId.trim(),
     };
     final url = Uri.parse('$_baseUrl/api/user-inbox/thread').replace(queryParameters: query);
-    final response = await http
-        .delete(url, headers: _authHeaders())
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'DELETE',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception('DELETE thread failed ${response.statusCode}: ${response.body}');
     }
@@ -1043,9 +1241,12 @@ class CoreService {
     };
     if (afterId != null && afterId.trim().isNotEmpty) query['after_id'] = afterId.trim();
     final url = Uri.parse('$_baseUrl/api/user-inbox').replace(queryParameters: query);
-    final response = await http
-        .get(url, headers: _authHeaders())
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode != 200) {
       throw Exception('GET inbox failed ${response.statusCode}: ${response.body}');
     }
@@ -1168,9 +1369,12 @@ class CoreService {
   /// GET /api/skills/list — list installed skills (Companion->Core direct). Requires session token.
   Future<List<Map<String, dynamic>>> getSkillsList() async {
     final url = Uri.parse('$_baseUrl/api/skills/list');
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -1191,9 +1395,12 @@ class CoreService {
   Future<List<Map<String, dynamic>>> searchSkills(String query) async {
     final q = query.trim();
     final url = Uri.parse('$_baseUrl/api/skills/search').replace(queryParameters: q.isEmpty ? {} : {'query': q});
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -1233,13 +1440,13 @@ class CoreService {
     if (version != null && version.trim().isNotEmpty) body['version'] = version.trim();
     if (dryRun) body['dry_run'] = true;
     if (withDeps) body['with_deps'] = true;
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
-          body: jsonEncode(body),
-        )
-        .timeout(const Duration(seconds: 120));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: jsonEncode(body),
+      timeout: const Duration(seconds: 120),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -1279,9 +1486,12 @@ class CoreService {
   /// GET /api/skills/clawhub-login-status — whether ClawHub CLI is logged in (whoami). Requires session token.
   Future<Map<String, dynamic>> getClawhubLoginStatus() async {
     final url = Uri.parse('$_baseUrl/api/skills/clawhub-login-status');
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 10));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 10),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -1298,9 +1508,12 @@ class CoreService {
   /// Server starts login and returns the URL quickly (~15 s); complete OAuth on the machine running Core, then tap Refresh status.
   Future<Map<String, dynamic>> clawhubLogin() async {
     final url = Uri.parse('$_baseUrl/api/skills/clawhub-login');
-    final response = await http
-        .post(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -1326,13 +1539,13 @@ class CoreService {
   Future<Map<String, dynamic>> clawhubLoginWithToken(String token) async {
     final url = Uri.parse('$_baseUrl/api/skills/clawhub-login');
     final body = jsonEncode(<String, String>{'token': token.trim()});
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
-          body: body,
-        )
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: body,
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -1358,13 +1571,13 @@ class CoreService {
   Future<void> removeSkill(String folder) async {
     final url = Uri.parse('$_baseUrl/api/skills/remove');
     final body = jsonEncode(<String, String>{'folder': folder.trim()});
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
-          body: body,
-        )
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: body,
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired; please log in again');
@@ -1378,6 +1591,115 @@ class CoreService {
     final detail = map['detail'] ?? map['error'];
     final msg = detail is String ? detail : (response.statusCode == 403 ? 'Cannot remove built-in skill' : response.statusCode == 404 ? 'Skill not found' : 'Remove failed');
     throw Exception(msg);
+  }
+
+  static const Duration _companionTunnelMaxShort = Duration(seconds: 175);
+  static const Duration _companionTunnelMaxMultipart = Duration(seconds: 900);
+
+  Duration _companionTunnelCap(_CompanionTunnelCapKind kind) {
+    switch (kind) {
+      case _CompanionTunnelCapKind.shortLived:
+        return _companionTunnelMaxShort;
+      case _CompanionTunnelCapKind.multipart:
+        return _companionTunnelMaxMultipart;
+      case _CompanionTunnelCapKind.longInbound:
+        return Duration(seconds: sendMessageTimeoutSeconds);
+    }
+  }
+
+  Future<bool> _envoyCoreHttpEligible({
+    required Duration requested,
+    required Duration cap,
+  }) async {
+    if (!_useEnvoyCoreHttp || _envoyForCoreHttp == null) return false;
+    if (requested > cap) return false;
+    return _envoyForCoreHttp!.isRelayConnected;
+  }
+
+  Future<Uint8List> _encodeMultipartRequestBody(http.MultipartRequest request) async {
+    final chunks = <int>[];
+    await for (final chunk in request.finalize()) {
+      chunks.addAll(chunk);
+    }
+    return Uint8List.fromList(chunks);
+  }
+
+  /// Multipart PUT/POST with tunnel-first (body fully materialized), then TCP fallback.
+  Future<http.Response> _multipartResponseWithTunnelFallback({
+    required Future<http.MultipartRequest> Function() build,
+    required Duration timeout,
+  }) async {
+    if (await _envoyCoreHttpEligible(
+          requested: timeout,
+          cap: _companionTunnelCap(_CompanionTunnelCapKind.multipart),
+        )) {
+      try {
+        final r = await build();
+        final body = await _encodeMultipartRequestBody(r);
+        final hdrs = Map<String, String>.from(r.headers);
+        return await _coreHttpViaEnvoyOrDirect(
+          method: r.method,
+          uri: r.url,
+          headers: hdrs,
+          body: body,
+          timeout: timeout,
+          tunnelCapKind: _CompanionTunnelCapKind.multipart,
+        );
+      } catch (e) {
+        if (RelayClient.looksLikeRpcMethodNotFound(e)) {
+          rethrow;
+        }
+      }
+    }
+    final r2 = await build();
+    return http.Response.fromStream(await r2.send().timeout(timeout));
+  }
+
+  /// GET/POST/… to Core directly or through the Envoy home node proxy when enabled.
+  Future<http.Response> _coreHttpViaEnvoyOrDirect({
+    required String method,
+    required Uri uri,
+    required Map<String, String> headers,
+    Object? body,
+    Duration? timeout,
+    _CompanionTunnelCapKind tunnelCapKind = _CompanionTunnelCapKind.shortLived,
+  }) async {
+    final t = timeout ?? const Duration(seconds: 30);
+    final cap = _companionTunnelCap(tunnelCapKind);
+    if (await _envoyCoreHttpEligible(requested: t, cap: cap)) {
+      try {
+        return await _envoyForCoreHttp!.homeclawCoreHttpViaRelay(
+          method: method,
+          fullUri: uri,
+          headers: headers,
+          body: body,
+          timeout: t,
+        );
+      } catch (e) {
+        if (RelayClient.looksLikeRpcMethodNotFound(e)) {
+          throw StateError(
+            'Envoy relay: homeclawCoreProxy method not supported on this node. Update EnvoyMesh on the paired home machine.',
+          );
+        }
+        /* direct fallback */
+      }
+    }
+    switch (method.toUpperCase()) {
+      case 'GET':
+        return http.get(uri, headers: headers).timeout(t);
+      case 'POST':
+        return http.post(uri, headers: headers, body: body).timeout(t);
+      case 'PUT':
+        return http.put(uri, headers: headers, body: body).timeout(t);
+      case 'PATCH':
+        return http.patch(uri, headers: headers, body: body).timeout(t);
+      case 'DELETE':
+        return http.delete(uri, headers: headers).timeout(t);
+      case 'HEAD':
+        return http.head(uri, headers: headers).timeout(t);
+      default:
+        throw ArgumentError('Unsupported HTTP method: $method');
+    }
   }
 
   /// Auth headers for requests. Use [forCompanionApi: true] only for /api/me and /api/me/friends (they require Bearer session token).
@@ -1443,7 +1765,12 @@ class CoreService {
     final uid = ownerUserId.trim();
     if (uid.isEmpty) throw Exception('owner_user_id required');
     final url = Uri.parse('$_baseUrl/api/clawcode/sessions').replace(queryParameters: {'owner_user_id': uid});
-    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception(_formatCoreApiError(response.body, response.statusCode));
     }
@@ -1458,7 +1785,12 @@ class CoreService {
   }) async {
     final url = Uri.parse('$_baseUrl/api/clawcode/sessions/${Uri.encodeComponent(sessionId.trim())}')
         .replace(queryParameters: {'owner_user_id': ownerUserId.trim()});
-    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception(_formatCoreApiError(response.body, response.statusCode));
     }
@@ -1477,13 +1809,13 @@ class CoreService {
     if (body.isEmpty) throw Exception('patch body must include at least one allowed field');
     final url = Uri.parse('$_baseUrl/api/clawcode/sessions/${Uri.encodeComponent(sessionId.trim())}')
         .replace(queryParameters: {'owner_user_id': ownerUserId.trim()});
-    final response = await http
-        .patch(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders()},
-          body: jsonEncode(body),
-        )
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'PATCH',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders()},
+      body: jsonEncode(body),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception(_formatCoreApiError(response.body, response.statusCode));
     }
@@ -1503,13 +1835,13 @@ class CoreService {
     if (c.isEmpty) throw Exception('cwd required');
     final url = Uri.parse('$_baseUrl/api/clawcode/sessions/${Uri.encodeComponent(sessionId.trim())}/rebind')
         .replace(queryParameters: {'owner_user_id': ownerUserId.trim()});
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders()},
-          body: jsonEncode({'cwd': c}),
-        )
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders()},
+      body: jsonEncode({'cwd': c}),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception(_formatCoreApiError(response.body, response.statusCode));
     }
@@ -1527,7 +1859,12 @@ class CoreService {
   }) async {
     final url = Uri.parse('$_baseUrl/api/clawcode/sessions/${Uri.encodeComponent(sessionId.trim())}/files')
         .replace(queryParameters: {'owner_user_id': ownerUserId.trim(), 'path': relativePath});
-    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception(_formatCoreApiError(response.body, response.statusCode));
     }
@@ -1538,7 +1875,12 @@ class CoreService {
   /// GET /api/clawcode/approvals
   Future<List<Map<String, dynamic>>> fetchClawcodeApprovals(String ownerUserId) async {
     final url = Uri.parse('$_baseUrl/api/clawcode/approvals').replace(queryParameters: {'owner_user_id': ownerUserId.trim()});
-    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception(_formatCoreApiError(response.body, response.statusCode));
     }
@@ -1572,7 +1914,12 @@ class CoreService {
   /// GET /api/clawcode/mcp/servers — sanitized MCP server list (Milestone C).
   Future<Map<String, dynamic>> fetchClawcodeMcpServers() async {
     final url = Uri.parse('$_baseUrl/api/clawcode/mcp/servers');
-    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception(_formatCoreApiError(response.body, response.statusCode));
     }
@@ -1589,13 +1936,13 @@ class CoreService {
     if (serverIds != null && serverIds.isNotEmpty) {
       body['server_ids'] = serverIds;
     }
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders()},
-          body: jsonEncode(body),
-        )
-        .timeout(const Duration(seconds: 120));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders()},
+      body: jsonEncode(body),
+      timeout: const Duration(seconds: 120),
+    );
     if (response.statusCode != 200) {
       throw Exception(_formatCoreApiError(response.body, response.statusCode));
     }
@@ -1614,13 +1961,13 @@ class CoreService {
     final url = Uri.parse('$_baseUrl/api/clawcode/approvals/${Uri.encodeComponent(approvalId.trim())}/resolve')
         .replace(queryParameters: {'owner_user_id': ownerUserId.trim()});
     final body = jsonEncode({'decision': decision});
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders()},
-          body: body,
-        )
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders()},
+      body: body,
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception(_formatCoreApiError(response.body, response.statusCode));
     }
@@ -1661,7 +2008,13 @@ class CoreService {
         'platform': platform,
         'device_id': deviceId,
       });
-      await http.post(url, headers: {'Content-Type': 'application/json', ..._authHeaders()}, body: body).timeout(const Duration(seconds: 10));
+      await _coreHttpViaEnvoyOrDirect(
+        method: 'POST',
+        uri: url,
+        headers: {'Content-Type': 'application/json', ..._authHeaders()},
+        body: body,
+        timeout: const Duration(seconds: 10),
+      );
     } catch (_) {}
   }
 
@@ -1669,7 +2022,12 @@ class CoreService {
   Future<bool> checkConnection() async {
     try {
       final url = Uri.parse('$_baseUrl/api/config/core');
-      await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 5));
+      await _coreHttpViaEnvoyOrDirect(
+        method: 'GET',
+        uri: url,
+        headers: _authHeaders(),
+        timeout: const Duration(seconds: 5),
+      );
       return true;
     } catch (_) {
       return false;
@@ -1685,7 +2043,12 @@ class CoreService {
       'scope': scope,
       'path': path,
     });
-    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 45));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 45),
+    );
     if (response.statusCode != 200) {
       throw Exception(_formatCoreApiError(response.body, response.statusCode));
     }
@@ -1715,7 +2078,12 @@ class CoreService {
     final url = Uri.parse('$_baseUrl/api/sandbox/file-view-url').replace(
       queryParameters: {'path': relativePathFromList},
     );
-    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception(_formatCoreApiError(response.body, response.statusCode));
     }
@@ -1737,7 +2105,12 @@ class CoreService {
   /// GET /api/sandbox/file — file bytes (path = entry.path from [fetchSandboxList]).
   Future<Uint8List> fetchSandboxFileBytes(String relativePathFromBase) async {
     final url = Uri.parse('$_baseUrl/api/sandbox/file').replace(queryParameters: {'path': relativePathFromBase});
-    final response = await http.get(url, headers: _authHeaders()).timeout(const Duration(seconds: 120));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 120),
+    );
     if (response.statusCode != 200) {
       throw Exception(_formatCoreApiError(response.body, response.statusCode));
     }
@@ -1754,23 +2127,29 @@ class CoreService {
   Future<List<String>> uploadFiles(List<String> filePaths) async {
     if (filePaths.isEmpty) return [];
     final url = Uri.parse('$_baseUrl/api/upload');
-    final request = http.MultipartRequest('POST', url);
-    request.headers.addAll(_authHeaders());
-    var attached = 0;
-    for (final p in filePaths) {
-      final file = File(p);
-      if (!await file.exists()) continue;
-      attached++;
-      final name = path.basename(p);
-      request.files.add(await http.MultipartFile.fromPath('files', p, filename: name));
-    }
-    if (filePaths.isNotEmpty && attached == 0) {
-      throw Exception(
-        'Upload failed: no files could be read (missing path or permission). Re-pick the photo and try again.',
-      );
-    }
-    final streamed = await request.send().timeout(Duration(seconds: sendMessageTimeoutSeconds));
-    final response = await http.Response.fromStream(streamed);
+    final timeout = Duration(seconds: sendMessageTimeoutSeconds);
+    final response = await _multipartResponseWithTunnelFallback(
+      build: () async {
+        final req = http.MultipartRequest('POST', url);
+        req.headers.addAll(_authHeaders());
+        var attached = 0;
+        for (final p in filePaths) {
+          final file = File(p);
+          if (await file.exists()) {
+            attached++;
+            final name = path.basename(p);
+            req.files.add(await http.MultipartFile.fromPath('files', p, filename: name));
+          }
+        }
+        if (filePaths.isNotEmpty && attached == 0) {
+          throw Exception(
+            'Upload failed: no files could be read (missing path or permission). Re-pick the photo and try again.',
+          );
+        }
+        return req;
+      },
+      timeout: timeout,
+    );
     if (response.statusCode != 200) {
       throw Exception('Upload failed ${response.statusCode}: ${response.body}');
     }
@@ -1875,9 +2254,13 @@ class CoreService {
       'Content-Type': 'application/json',
       ..._authHeaders(),
     };
-    final response = await http
-        .post(url, headers: headers, body: jsonEncode(body))
-        .timeout(Duration(seconds: sendMessageTimeoutSeconds));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: headers,
+      body: jsonEncode(body),
+      timeout: Duration(seconds: sendMessageTimeoutSeconds),
+    );
     if (response.statusCode != 200) {
       final err = response.body;
       throw Exception('Core returned ${response.statusCode}: $err');
@@ -1906,9 +2289,12 @@ class CoreService {
     if (userId != null) queryParams['user_id'] = userId;
     if (friendId != null) queryParams['friend_id'] = friendId;
     final url = Uri.parse('$_baseUrl/api/cursor-bridge/status').replace(queryParameters: queryParams);
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 10));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 10),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired');
@@ -1944,9 +2330,12 @@ class CoreService {
     final url = Uri.parse('$_baseUrl/api/cursor-bridge/project-list').replace(
       queryParameters: queryParams,
     );
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired');
@@ -2009,9 +2398,12 @@ class CoreService {
     final url = Uri.parse('$_baseUrl/api/cursor-bridge/project-file').replace(
       queryParameters: queryParams,
     );
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 60));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 60),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired');
@@ -2050,9 +2442,12 @@ class CoreService {
     final url = Uri.parse('$_baseUrl/api/cursor-bridge/root-list').replace(
       queryParameters: queryParams,
     );
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired');
@@ -2109,13 +2504,13 @@ class CoreService {
     if (userId != null) reqBody['user_id'] = userId;
     if (friendId != null) reqBody['friend_id'] = friendId;
     final body = jsonEncode(reqBody);
-    final response = await http
-        .post(
-          url,
-          headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
-          body: body,
-        )
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: body,
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired');
@@ -2145,9 +2540,12 @@ class CoreService {
     final url = Uri.parse('$_baseUrl/api/cursor-bridge/project-browser-url').replace(
       queryParameters: qp,
     );
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired');
@@ -2173,9 +2571,12 @@ class CoreService {
   /// GET /api/reminders/list — list recurring + one-shot reminders for current companion user.
   Future<List<ReminderListItem>> fetchRemindersList() async {
     final url = Uri.parse('$_baseUrl/api/reminders/list');
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired');
@@ -2213,9 +2614,13 @@ class CoreService {
   Future<void> deleteReminder({required String id, required String type}) async {
     final url = Uri.parse('$_baseUrl/api/reminders/delete');
     final body = jsonEncode({'id': id, 'type': type});
-    final response = await http
-        .post(url, headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)}, body: body)
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: {'Content-Type': 'application/json', ..._authHeaders(forCompanionApi: true)},
+      body: body,
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired');
@@ -2250,9 +2655,13 @@ class CoreService {
       body['command'] = command!.trim();
       if (cwd != null && cwd.trim().isNotEmpty) body['cwd'] = cwd.trim();
     }
-    final response = await http
-        .post(url, headers: _authHeaders(forCompanionApi: true), body: jsonEncode(body))
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      body: jsonEncode(body),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired');
@@ -2265,9 +2674,12 @@ class CoreService {
 
   Future<Map<String, dynamic>> interactiveRead({required String sessionId, int fromSeq = 1}) async {
     final url = Uri.parse('$_baseUrl/api/interactive/read?session_id=$sessionId&from_seq=$fromSeq');
-    final response = await http
-        .get(url, headers: _authHeaders(forCompanionApi: true))
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired');
@@ -2281,9 +2693,13 @@ class CoreService {
   Future<void> interactiveWrite({required String sessionId, required String data}) async {
     final url = Uri.parse('$_baseUrl/api/interactive/write');
     final body = <String, dynamic>{'session_id': sessionId, 'data': data};
-    final response = await http
-        .post(url, headers: _authHeaders(forCompanionApi: true), body: jsonEncode(body))
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      body: jsonEncode(body),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired');
@@ -2296,9 +2712,13 @@ class CoreService {
   Future<void> interactiveStop({required String sessionId}) async {
     final url = Uri.parse('$_baseUrl/api/interactive/stop');
     final body = <String, dynamic>{'session_id': sessionId};
-    final response = await http
-        .post(url, headers: _authHeaders(forCompanionApi: true), body: jsonEncode(body))
-        .timeout(const Duration(seconds: 15));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: _authHeaders(forCompanionApi: true),
+      body: jsonEncode(body),
+      timeout: const Duration(seconds: 15),
+    );
     if (response.statusCode == 401) {
       await _handleSessionExpired();
       throw Exception('Session expired');
@@ -2368,7 +2788,12 @@ class CoreService {
     if (requestId == null || requestId.isEmpty) return null;
     try {
       final resultUrl = Uri.parse('$_baseUrl/inbound/result').replace(queryParameters: {'request_id': requestId});
-      final response = await http.get(resultUrl, headers: _authHeaders()).timeout(const Duration(seconds: 30));
+      final response = await _coreHttpViaEnvoyOrDirect(
+        method: 'GET',
+        uri: resultUrl,
+        headers: _authHeaders(),
+        timeout: const Duration(seconds: 30),
+      );
       if (response.statusCode == 404) {
         await _clearPendingRequestId(userId, friendId);
         return null;
@@ -2398,33 +2823,176 @@ class CoreService {
     return null;
   }
 
+  Future<void> _tearDownCoreWebSocket() async {
+    _coreWsPingTimer?.cancel();
+    _coreWsPingTimer = null;
+
+    await _coreWsCompanionTunnelSubscription?.cancel();
+    _coreWsCompanionTunnelSubscription = null;
+
+    if (_coreWsUsesCompanionTunnel) {
+      _coreWsUsesCompanionTunnel = false;
+      final envoy = _envoyForCoreHttp;
+      if (envoy != null && envoy.isRelayConnected) {
+        try {
+          await envoy.homeClawCoreWsClose();
+        } catch (_) {}
+      }
+    }
+
+    await _coreWsSubscription?.cancel();
+    _coreWsSubscription = null;
+
+    try {
+      await _coreWsChannel?.sink.close();
+    } catch (_) {}
+    _coreWsChannel = null;
+    _coreWsSessionId = null;
+    _coreWsRegisteredUserId = null;
+    _coreWsBaseUrl = null;
+  }
+
+  Future<void> _sendCoreWsText(String utf8Text) async {
+    if (_coreWsUsesCompanionTunnel) {
+      final envoy = _envoyForCoreHttp;
+      if (envoy == null || !envoy.isRelayConnected) return;
+      try {
+        final r = await envoy.homeClawCoreWsSend(text: utf8Text);
+        if (r['ok'] == true) return;
+      } catch (_) {}
+      await _tearDownCoreWebSocket();
+      return;
+    }
+    try {
+      _coreWsChannel?.sink.add(utf8Text);
+    } catch (_) {
+      await _tearDownCoreWebSocket();
+    }
+  }
+
   /// Ensure WebSocket to Core /ws is connected (for push). When connected, Core sends {"event": "connected", "session_id": "..."}; we send {"event": "register", "user_id": userId} so Core can push proactive messages (cron, reminders) to this connection. [userId] from the message being sent (e.g. body['user_id']). Open WS for both local and remote Core so reminders/cron are delivered. Re-registers when userId changes so reminders for the current chat user are delivered.
   Future<void> _ensureCoreWsConnected([String? userId]) async {
     final trimmed = userId?.trim() ?? '';
     final registerUserId = trimmed.isNotEmpty ? trimmed : 'companion';
-    if (_coreWsChannel != null && _coreWsSessionId != null && _coreWsBaseUrl == _baseUrl) {
+
+    if (_coreWsUsesCompanionTunnel &&
+        (!coreHttpTunnelActive || _coreWsBaseUrl != _baseUrl)) {
+      await _tearDownCoreWebSocket();
+    }
+
+    final tunnelReuse = _coreWsUsesCompanionTunnel &&
+        coreHttpTunnelActive &&
+        _coreWsSessionId != null &&
+        _coreWsBaseUrl == _baseUrl;
+    final directReuse = !_coreWsUsesCompanionTunnel &&
+        _coreWsChannel != null &&
+        _coreWsSessionId != null &&
+        _coreWsBaseUrl == _baseUrl;
+
+    if (tunnelReuse || directReuse) {
       if (_coreWsRegisteredUserId == registerUserId) return;
       _coreWsRegisteredUserId = registerUserId;
-      try {
-        _coreWsChannel?.sink.add(jsonEncode({'event': 'register', 'user_id': registerUserId}));
-      } catch (_) {}
+      await _sendCoreWsText(jsonEncode({'event': 'register', 'user_id': registerUserId}));
       return;
     }
-    _coreWsPingTimer?.cancel();
-    _coreWsPingTimer = null;
-    _coreWsChannel?.sink.close();
-    _coreWsSubscription?.cancel();
-    _coreWsChannel = null;
-    _coreWsSessionId = null;
-    _coreWsBaseUrl = null;
-    _coreWsRegisteredUserId = null;
+
+    await _tearDownCoreWebSocket();
+
+    final pathAndQuery = (_apiKey != null && _apiKey!.isNotEmpty)
+        ? '/ws?api_key=${Uri.encodeComponent(_apiKey!)}'
+        : '/ws';
+
+    final envoy = _envoyForCoreHttp;
+
+    Future<void> tryOpenCompanionWsTunnel(EnvoyNodeService e) async {
+      Future<void> finalizeTunnelFailure() async {
+        await _coreWsCompanionTunnelSubscription?.cancel();
+        _coreWsCompanionTunnelSubscription = null;
+        _coreWsPingTimer?.cancel();
+        _coreWsPingTimer = null;
+        _coreWsSessionId = null;
+        _coreWsRegisteredUserId = null;
+        _coreWsUsesCompanionTunnel = false;
+        if (_envoyForCoreHttp != null && _envoyForCoreHttp!.isRelayConnected) {
+          try {
+            await _envoyForCoreHttp!.homeClawCoreWsClose();
+          } catch (_) {}
+        }
+      }
+
+      late final Completer<void> handshake;
+      Map<String, dynamic> res;
+      try {
+        res = await e.homeClawCoreWsOpen(
+          pathWithQuery: pathAndQuery,
+          timeout: const Duration(seconds: 45),
+        );
+      } catch (_) {
+        await finalizeTunnelFailure();
+        rethrow;
+      }
+      if (res['ok'] != true) {
+        await finalizeTunnelFailure();
+        throw StateError('homeClawCoreWsOpen failed: ${res['error']}');
+      }
+
+      _coreWsBaseUrl = _baseUrl;
+      _coreWsUsesCompanionTunnel = true;
+      handshake = Completer<void>();
+
+      _coreWsCompanionTunnelSubscription = e.onHomeClawCoreWsText.listen(
+        (data) {
+          if (!handshake.isCompleted) {
+            try {
+              final msg = _tryDecodeWsMap(data);
+              if (msg != null && msg['event'] == 'connected') {
+                _coreWsSessionId = msg['session_id'] as String?;
+                handshake.complete();
+                _coreWsRegisteredUserId = registerUserId;
+                unawaited(_sendCoreWsText(
+                  jsonEncode({'event': 'register', 'user_id': registerUserId}),
+                ));
+                _startCoreWsPingTimer();
+              }
+            } catch (_) {}
+          }
+          _onCoreWsMessage(data);
+        },
+        onError: (_) {
+          unawaited(finalizeTunnelFailure());
+        },
+        onDone: () {
+          unawaited(finalizeTunnelFailure());
+        },
+        cancelOnError: false,
+      );
+
+      try {
+        await handshake.future.timeout(_coreWsHandshakeTimeoutResolved());
+      } on TimeoutException {
+        await finalizeTunnelFailure();
+        rethrow;
+      }
+    }
+
+    if (coreHttpTunnelActive &&
+        envoy != null &&
+        await _envoyCoreHttpEligible(
+          requested: const Duration(seconds: 45),
+          cap: _companionTunnelCap(_CompanionTunnelCapKind.shortLived),
+        )) {
+      try {
+        await tryOpenCompanionWsTunnel(envoy);
+        return;
+      } catch (_) {
+        await _tearDownCoreWebSocket();
+      }
+    }
+
     try {
       _coreWsBaseUrl = _baseUrl;
+      _coreWsUsesCompanionTunnel = false;
       final baseWs = _baseUrl.replaceFirst(RegExp(r'^http'), 'ws').replaceFirst(RegExp(r'/$'), '');
-      // Path must be /ws; query ?api_key=... separate (was: base?api_key=.../ws → path became ?api_key=.../ws → 403)
-      final pathAndQuery = (_apiKey != null && _apiKey!.isNotEmpty)
-          ? '/ws?api_key=${Uri.encodeComponent(_apiKey!)}'
-          : '/ws';
       final uri = Uri.parse('$baseWs$pathAndQuery');
       _coreWsChannel = WebSocketChannel.connect(uri);
       final completer = Completer<void>();
@@ -2458,13 +3026,21 @@ class CoreService {
         },
         cancelOnError: false,
       );
-      await completer.future.timeout(Duration(seconds: 10), onTimeout: () {
+      try {
+        await completer.future.timeout(_coreWsHandshakeTimeoutResolved());
+      } on TimeoutException {
         _coreWsPingTimer?.cancel();
         _coreWsPingTimer = null;
         _coreWsSessionId = null;
         _coreWsBaseUrl = null;
         _coreWsRegisteredUserId = null;
-      });
+        await _coreWsSubscription?.cancel();
+        _coreWsSubscription = null;
+        try {
+          await _coreWsChannel?.sink.close();
+        } catch (_) {}
+        _coreWsChannel = null;
+      }
     } catch (_) {
       _coreWsPingTimer?.cancel();
       _coreWsPingTimer = null;
@@ -2477,10 +3053,8 @@ class CoreService {
   void _startCoreWsPingTimer() {
     _coreWsPingTimer?.cancel();
     _coreWsPingTimer = Timer.periodic(_coreWsPingInterval, (_) {
-      if (_coreWsChannel == null || _coreWsSessionId == null) return;
-      try {
-        _coreWsChannel?.sink.add(jsonEncode({'event': 'ping'}));
-      } catch (_) {}
+      if (_coreWsSessionId == null) return;
+      unawaited(_sendCoreWsText(jsonEncode({'event': 'ping'})));
     });
   }
 
@@ -2593,9 +3167,13 @@ class CoreService {
     // Core returns 202 immediately after enqueue; do not use a short timeout here — remote TLS,
     // slow proxies, or high RTT (e.g. cross-region) can exceed 30s before the first byte and caused
     // TimeoutException("Future not completed", 0:00:30) while the server would have accepted.
-    final response = await http
-        .post(inboundUrl, headers: headers, body: jsonEncode(body))
-        .timeout(Duration(seconds: sendMessageTimeoutSeconds));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: inboundUrl,
+      headers: headers,
+      body: jsonEncode(body),
+      timeout: Duration(seconds: sendMessageTimeoutSeconds),
+    );
     if (response.statusCode != 202) {
       final err = response.body;
       throw Exception('Core returned ${response.statusCode}: $err');
@@ -2681,9 +3259,13 @@ class CoreService {
         'Content-Type': 'application/json',
         ..._authHeaders(),
       };
-      await http
-          .post(cancelUrl, headers: headers, body: jsonEncode({'request_id': requestId}))
-          .timeout(const Duration(seconds: 10));
+      await _coreHttpViaEnvoyOrDirect(
+        method: 'POST',
+        uri: cancelUrl,
+        headers: headers,
+        body: jsonEncode({'request_id': requestId}),
+        timeout: const Duration(seconds: 10),
+      );
     } catch (_) {}
     _currentInboundRequestId = null;
     _currentInboundCompleter = null;
@@ -2712,7 +3294,12 @@ class CoreService {
       http.Response? response;
       for (var attempt = 0; attempt < retriesPerAttempt; attempt++) {
         try {
-          response = await http.get(resultUrl, headers: headers).timeout(Duration(seconds: 30));
+          response = await _coreHttpViaEnvoyOrDirect(
+            method: 'GET',
+            uri: resultUrl,
+            headers: headers,
+            timeout: Duration(seconds: 30),
+          );
           break;
         } on SocketException catch (_) {
           if (attempt == retriesPerAttempt - 1) rethrow;
@@ -2798,92 +3385,136 @@ class CoreService {
     throw TimeoutException('Inbound async result timed out');
   }
 
+  Future<Map<String, dynamic>> _parseInboundSseFromUtf8ChunkStream(
+    Stream<String> utf8Chunks,
+    void Function(String message) onProgress,
+  ) async {
+    final buffer = StringBuffer();
+    await for (final chunk in utf8Chunks) {
+      buffer.write(chunk);
+      final text = buffer.toString();
+      final parts = text.split('\n\n');
+      buffer.clear();
+      if (parts.length > 1) {
+        for (var i = 0; i < parts.length - 1; i++) {
+          final eventText = parts[i].trim();
+          for (final line in eventText.split('\n')) {
+            if (line.startsWith('data: ')) {
+              try {
+                final json = jsonDecode(line.substring(6)) as Map<String, dynamic>?;
+                if (json == null) continue;
+                final event = json['event'] as String?;
+                if (event == 'progress') {
+                  final message = json['message'] as String?;
+                  if (message != null && message.isNotEmpty) onProgress(message);
+                } else if (event == 'done') {
+                  final ok = json['ok'] as bool? ?? false;
+                  final outText = (json['text'] as String?) ?? '';
+                  final err = json['error'] as String?;
+                  final responseImages = json['images'];
+                  final responseImage = json['image'];
+                  final imageList = responseImages is List
+                      ? responseImages.whereType<String>().toList()
+                      : (responseImage is String ? <String>[responseImage] : null);
+                  return {
+                    'text': ok ? outText : (err ?? outText),
+                    'images': imageList != null && imageList.isNotEmpty ? imageList : null,
+                  };
+                }
+              } catch (_) {}
+            }
+          }
+        }
+        buffer.write(parts.last);
+      } else {
+        buffer.write(text);
+      }
+    }
+    final remainder = buffer.toString();
+    if (remainder.trim().isNotEmpty) {
+      for (final line in remainder.split('\n')) {
+        if (line.startsWith('data: ')) {
+          try {
+            final json = jsonDecode(line.substring(6)) as Map<String, dynamic>?;
+            if (json != null && json['event'] == 'done') {
+              final ok = json['ok'] as bool? ?? false;
+              final outText = (json['text'] as String?) ?? '';
+              final err = json['error'] as String?;
+              final responseImages = json['images'];
+              final responseImage = json['image'];
+              final imageList = responseImages is List
+                  ? responseImages.whereType<String>().toList()
+                  : (responseImage is String ? <String>[responseImage] : null);
+              return {
+                'text': ok ? outText : (err ?? outText),
+                'images': imageList != null && imageList.isNotEmpty ? imageList : null,
+              };
+            }
+          } catch (_) {}
+        }
+      }
+    }
+    throw Exception('Stream ended without done event');
+  }
+
   /// POST /inbound with stream: true; parses SSE and calls [onProgress] for progress events, returns final result from "done" event.
   Future<Map<String, dynamic>> _sendMessageStream(
     Uri url,
     Map<String, dynamic> body,
     void Function(String message) onProgress,
   ) async {
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      ..._authHeaders(),
+    };
+    final timeout = Duration(seconds: sendMessageTimeoutSeconds);
+    final encodedBody = jsonEncode(body);
+
+    final tunnelOk = await _envoyCoreHttpEligible(
+      requested: timeout,
+      cap: _companionTunnelCap(_CompanionTunnelCapKind.longInbound),
+    );
+
+    if (tunnelOk) {
+      try {
+        final response = await _coreHttpViaEnvoyOrDirect(
+          method: 'POST',
+          uri: url,
+          headers: headers,
+          body: encodedBody,
+          timeout: timeout,
+          tunnelCapKind: _CompanionTunnelCapKind.longInbound,
+        );
+        if (response.statusCode != 200) {
+          throw Exception('Core returned ${response.statusCode}: ${response.body}');
+        }
+        return await _parseInboundSseFromUtf8ChunkStream(Stream.value(response.body), onProgress);
+      } catch (e) {
+        if (RelayClient.looksLikeRpcMethodNotFound(e)) {
+          throw StateError(
+            'Envoy relay: homeclawCoreProxy method not supported on this node. Update EnvoyMesh on the paired home machine.',
+          );
+        }
+      }
+    }
+
     final client = http.Client();
     try {
       final request = http.Request('POST', url);
-      request.body = jsonEncode(body);
-      request.headers['Content-Type'] = 'application/json';
-      request.headers.addAll(_authHeaders());
+      request.body = encodedBody;
+      request.headers.addAll(headers);
       final streamedResponse = await client.send(request).timeout(
-        Duration(seconds: sendMessageTimeoutSeconds),
+        timeout,
         onTimeout: () => throw TimeoutException('Inbound stream timed out'),
       );
       if (streamedResponse.statusCode != 200) {
         final err = await streamedResponse.stream.bytesToString();
         throw Exception('Core returned ${streamedResponse.statusCode}: $err');
       }
-      final buffer = StringBuffer();
-      await for (final chunk in streamedResponse.stream.transform(utf8.decoder)) {
-        buffer.write(chunk);
-        final text = buffer.toString();
-        final parts = text.split('\n\n');
-        buffer.clear();
-        if (parts.length > 1) {
-          for (var i = 0; i < parts.length - 1; i++) {
-            final eventText = parts[i].trim();
-            for (final line in eventText.split('\n')) {
-              if (line.startsWith('data: ')) {
-                try {
-                  final json = jsonDecode(line.substring(6)) as Map<String, dynamic>?;
-                  if (json == null) continue;
-                  final event = json['event'] as String?;
-                  if (event == 'progress') {
-                    final message = json['message'] as String?;
-                    if (message != null && message.isNotEmpty) onProgress(message);
-                  } else if (event == 'done') {
-                    final ok = json['ok'] as bool? ?? false;
-                    final outText = (json['text'] as String?) ?? '';
-                    final err = json['error'] as String?;
-                    final responseImages = json['images'];
-                    final responseImage = json['image'];
-                    final imageList = responseImages is List
-                        ? responseImages.whereType<String>().toList()
-                        : (responseImage is String ? <String>[responseImage] : null);
-                    return {
-                      'text': ok ? outText : (err ?? outText),
-                      'images': imageList != null && imageList.isNotEmpty ? imageList : null,
-                    };
-                  }
-                } catch (_) {}
-              }
-            }
-          }
-          buffer.write(parts.last);
-        } else {
-          buffer.write(text);
-        }
-      }
-      final remainder = buffer.toString();
-      if (remainder.trim().isNotEmpty) {
-        for (final line in remainder.split('\n')) {
-          if (line.startsWith('data: ')) {
-            try {
-              final json = jsonDecode(line.substring(6)) as Map<String, dynamic>?;
-              if (json != null && json['event'] == 'done') {
-                final ok = json['ok'] as bool? ?? false;
-                final outText = (json['text'] as String?) ?? '';
-                final err = json['error'] as String?;
-                final responseImages = json['images'];
-                final responseImage = json['image'];
-                final imageList = responseImages is List
-                    ? responseImages.whereType<String>().toList()
-                    : (responseImage is String ? <String>[responseImage] : null);
-                return {
-                  'text': ok ? outText : (err ?? outText),
-                  'images': imageList != null && imageList.isNotEmpty ? imageList : null,
-                };
-              }
-            } catch (_) {}
-          }
-        }
-      }
-      throw Exception('Stream ended without done event');
+      return await _parseInboundSseFromUtf8ChunkStream(
+        streamedResponse.stream.transform(utf8.decoder),
+        onProgress,
+      );
     } finally {
       client.close();
     }
@@ -2892,9 +3523,12 @@ class CoreService {
   /// GET /api/config/core — current core config (whitelisted keys). Throws on error.
   Future<Map<String, dynamic>> getConfigCore() async {
     final url = Uri.parse('$_baseUrl/api/config/core');
-    final response = await http
-        .get(url, headers: _authHeaders())
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception('Core config: ${response.statusCode} ${response.body}');
     }
@@ -2909,9 +3543,13 @@ class CoreService {
       'Content-Type': 'application/json',
       ..._authHeaders(),
     };
-    final response = await http
-        .patch(url, headers: headers, body: jsonEncode(body))
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'PATCH',
+      uri: url,
+      headers: headers,
+      body: jsonEncode(body),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception('Core config patch: ${response.statusCode} ${response.body}');
     }
@@ -2920,9 +3558,12 @@ class CoreService {
   /// GET /api/config/users — list users from Core (user.yml). Use for chat list: one chat per user, send user id with every message. Throws on error.
   Future<List<Map<String, dynamic>>> getConfigUsers() async {
     final url = Uri.parse('$_baseUrl/api/config/users');
-    final response = await http
-        .get(url, headers: _authHeaders())
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception('Config users: ${response.statusCode} ${response.body}');
     }
@@ -2944,9 +3585,13 @@ class CoreService {
       'Content-Type': 'application/json',
       ..._authHeaders(),
     };
-    final response = await http
-        .post(url, headers: headers, body: jsonEncode(user))
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: headers,
+      body: jsonEncode(user),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception('Add user: ${response.statusCode} ${response.body}');
     }
@@ -2959,9 +3604,13 @@ class CoreService {
       'Content-Type': 'application/json',
       ..._authHeaders(),
     };
-    final response = await http
-        .patch(url, headers: headers, body: jsonEncode(body))
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'PATCH',
+      uri: url,
+      headers: headers,
+      body: jsonEncode(body),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception('Update user: ${response.statusCode} ${response.body}');
     }
@@ -2970,9 +3619,12 @@ class CoreService {
   /// DELETE /api/config/users/{name} — remove user. Throws on error.
   Future<void> removeConfigUser(String name) async {
     final url = Uri.parse('$_baseUrl/api/config/users/${Uri.encodeComponent(name)}');
-    final response = await http
-        .delete(url, headers: _authHeaders())
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'DELETE',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200 && response.statusCode != 404) {
       throw Exception('Remove user: ${response.statusCode} ${response.body}');
     }
@@ -2981,9 +3633,12 @@ class CoreService {
   /// POST /memory/reset — clear RAG memory, AGENT_MEMORY, daily memory. For testing.
   Future<void> postMemoryReset() async {
     final url = Uri.parse('$_baseUrl/memory/reset');
-    final response = await http
-        .post(url, headers: _authHeaders())
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception('Memory reset: ${response.statusCode} ${response.body}');
     }
@@ -2992,9 +3647,12 @@ class CoreService {
   /// POST /knowledge_base/reset — clear knowledge base (all users). For testing.
   Future<void> postKnowledgeBaseReset() async {
     final url = Uri.parse('$_baseUrl/knowledge_base/reset');
-    final response = await http
-        .post(url, headers: _authHeaders())
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception('Knowledge base reset: ${response.statusCode} ${response.body}');
     }
@@ -3003,9 +3661,12 @@ class CoreService {
   /// GET or POST /knowledge_base/sync_folder — trigger manual sync of user's knowledgebase folder. Returns {ok, message, added, removed, errors}.
   Future<Map<String, dynamic>> syncKnowledgeBaseFolder(String userId) async {
     final url = Uri.parse('$_baseUrl/knowledge_base/sync_folder').replace(queryParameters: {'user_id': userId});
-    final response = await http
-        .get(url, headers: _authHeaders())
-        .timeout(const Duration(seconds: 60));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 60),
+    );
     final body = jsonDecode(response.body) as Map<String, dynamic>? ?? {};
     if (response.statusCode != 200) {
       throw Exception(body['detail']?.toString() ?? 'Sync failed: ${response.statusCode}');
@@ -3016,9 +3677,12 @@ class CoreService {
   /// POST /api/testing/clear-all — unregister external plugins and clear skills vector store. For testing.
   Future<void> postTestingClearAll() async {
     final url = Uri.parse('$_baseUrl/api/testing/clear-all');
-    final response = await http
-        .post(url, headers: _authHeaders())
-        .timeout(const Duration(seconds: 30));
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST',
+      uri: url,
+      headers: _authHeaders(),
+      timeout: const Duration(seconds: 30),
+    );
     if (response.statusCode != 200) {
       throw Exception('Clear all: ${response.statusCode} ${response.body}');
     }

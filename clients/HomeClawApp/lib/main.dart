@@ -61,6 +61,7 @@ void main() async {
   } catch (_) {
     // EnvoyMesh P2P init failed; app continues without P2P.
   }
+  coreService.bindEnvoyForCoreHttp(envoyService);
   // Register push token with Core when we have a session user (done per-chat in ChatScreen).
   if (coreService.isLoggedIn) {
     coreService.registerPushTokenWithCore(coreService.sessionUserId!);
