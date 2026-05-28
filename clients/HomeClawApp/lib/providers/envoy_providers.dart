@@ -73,15 +73,19 @@ class EnvoyMeshState {
   /// Whether the bridge agent is available as a contact.
   EnvoyMeshContact? get bridgeAgentContact {
     try {
-      return contacts.firstWhere((c) => c.role == 'agent');
+      return contacts.firstWhere(
+        (c) =>
+            c.kind == EnvoyMeshContactKind.bridgeAgent || c.role == 'agent',
+      );
     } catch (_) {
       return null;
     }
   }
 
   /// Human contacts (not the bridge agent).
-  List<EnvoyMeshContact> get humanContacts =>
-      contacts.where((c) => c.role != 'agent').toList();
+  List<EnvoyMeshContact> get humanContacts => contacts
+      .where((c) => c.kind == EnvoyMeshContactKind.bondedHuman)
+      .toList();
 }
 
 // ============================================

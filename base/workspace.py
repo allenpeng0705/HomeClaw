@@ -714,3 +714,95 @@ def clear_daily_memory_for_dates(
             except Exception:
                 pass
     return cleared
+
+
+# ── Workspace MEMORY.md (Phase 2: OpenClaw-inspired) ─────────────────────
+
+
+CANONICAL_WORKSPACE_MEMORY_FILENAME = "MEMORY.md"
+LEGACY_WORKSPACE_MEMORY_FILENAME = "memory.md"
+
+
+def resolve_workspace_memory_path(workspace_dir: Optional[Path] = None) -> Optional[Path]:
+    """
+    Resolve the canonical MEMORY.md file at the workspace root.
+
+    Checks MEMORY.md first, falls back to lowercase memory.md for legacy compat.
+    Returns None if neither exists.
+    """
+    root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
+    if not isinstance(root, Path):
+        root = Path(str(root))
+    try:
+        if not root.is_dir():
+            return None
+        # Use os.listdir for case-sensitive matching (macOS APFS is case-insensitive by default).
+        entries = os.listdir(str(root))
+        for name in (CANONICAL_WORKSPACE_MEMORY_FILENAME, LEGACY_WORKSPACE_MEMORY_FILENAME):
+            if name in entries:
+                p = root / name
+                if p.is_file():
+                    return p
+    except Exception:
+        pass
+    return None
+
+
+def load_workspace_memory_file(
+    workspace_dir: Optional[Path] = None,
+    max_chars: int = 0,
+) -> Optional[str]:
+    """
+    Load the workspace-root MEMORY.md content.
+
+    This is distinct from AGENT_MEMORY.md — MEMORY.md is shared across all agents
+    and sits at the workspace root (OpenClaw pattern).
+
+    Args:
+        workspace_dir: workspace root directory
+        max_chars: if > 0, truncate content to this many characters (bootstrap cap)
+
+    Returns content string or None if file doesn't exist.
+    """
+    path = resolve_workspace_memory_path(workspace_dir)
+    if path is None:
+        return None
+    try:
+        content = path.read_text(encoding="utf-8")
+        if max_chars > 0 and len(content) > max_chars:
+            content = content[:max_chars] + "\n\n[Truncated — use agent_memory_search for full content.]"
+        return content
+    except Exception:
+        return None
+
+
+def load_memory_corpus_files(
+    workspace_dir: Optional[Path] = None,
+    pattern: str = "memory/**/*.md",
+    max_files: int = 20,
+    max_chars_per_file: int = 10000,
+) -> List[Dict[str, str]]:
+    """
+    Load memory corpus files matching a glob pattern under the workspace.
+
+    Returns list of {path, content} dicts for files matching the pattern.
+    Useful for indexing into vector search or building a memory index.
+    """
+    root = workspace_dir if workspace_dir is not None else _DEFAULT_WORKSPACE_DIR
+    if not isinstance(root, Path):
+        root = Path(str(root))
+    try:
+        import glob as _glob_mod
+        matches = sorted(root.glob(pattern))[:max_files]
+    except Exception:
+        return []
+    results: List[Dict[str, str]] = []
+    for mp in matches:
+        try:
+            content = mp.read_text(encoding="utf-8")
+            if max_chars_per_file > 0 and len(content) > max_chars_per_file:
+                content = content[:max_chars_per_file]
+            results.append({"path": str(mp.relative_to(root)), "content": content})
+        except Exception:
+            pass
+    return results

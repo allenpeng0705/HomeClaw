@@ -170,7 +170,7 @@ class _EnvoyPairingScreenState extends ConsumerState<EnvoyPairingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Scan EnvoyMesh QR'),
+        title: const Text('Envoy pairing QR'),
       ),
       body: _pairing
           ? Center(
@@ -183,13 +183,33 @@ class _EnvoyPairingScreenState extends ConsumerState<EnvoyPairingScreen> {
                 ],
               ),
             )
-          : MobileScanner(
-              onDetect: _onDetect,
-              controller: MobileScannerController(
-                detectionSpeed: DetectionSpeed.normal,
-                facing: CameraFacing.back,
-                torchEnabled: false,
-              ),
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: Text(
+                    'Scan once—pairing details are saved on this device after success. '
+                    'If the relay drops later, Companion retries in the background (delay caps near 1 minute); '
+                    'use Settings → EnvoyMesh Connect anytime for an immediate dial. '
+                    'Scan again only for a new home node or if repair fails.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          height: 1.35,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ),
+                Expanded(
+                  child: MobileScanner(
+                    onDetect: _onDetect,
+                    controller: MobileScannerController(
+                      detectionSpeed: DetectionSpeed.normal,
+                      facing: CameraFacing.back,
+                      torchEnabled: false,
+                    ),
+                  ),
+                ),
+              ],
             ),
     );
   }

@@ -53,12 +53,18 @@ class DatabaseManager:
         return cls._instance
 
     def __init__(self, echo: bool = False):
-        self.database_uri = _resolve_database_uri()
-        self.echo = echo
-        self.engine: Engine = None
-        self._session_factory = None
-        self.setup_engine()
-        self.init_db()
+        # Singleton __new__ returns the same instance, but Python still runs __init__ on every
+        # DatabaseManager() call — guard so setup_engine/init_db run only once.
+        with DatabaseManager._lock:
+            if getattr(self, "_hm_db_initialized", False):
+                return
+            self.database_uri = _resolve_database_uri()
+            self.echo = echo
+            self.engine: Engine = None
+            self._session_factory = None
+            self.setup_engine()
+            self.init_db()
+            self._hm_db_initialized = True
 
     def create_tables(self):
         Base.metadata.create_all(self.engine)
@@ -126,7 +132,6 @@ class DatabaseManager:
 
     def get_session(self) -> SQLAlchemySession:
         """Provides a session for database operations."""
-        logger.debug("Database Manager get session")
         if not self._session_factory:
             raise RuntimeError("Session factory is not initialized. Call setup_engine() first.")
         return self._session_factory()

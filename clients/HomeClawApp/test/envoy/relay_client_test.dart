@@ -7,14 +7,15 @@ import 'package:home_claw_app/envoy/relay_client.dart';
 
 void main() {
   group('relayReconnectDelayMs', () {
-    test('maps attempt index with exponential backoff from base ms', () {
+    test('exponential backoff then plateau at max delay', () {
       expect(relayReconnectDelayMs(-2), relayReconnectDelayMs(0));
       expect(relayReconnectDelayMs(-1), relayReconnectDelayMs(0));
-      expect(relayReconnectDelayMs(0), kRelayReconnectBaseMs << 0);
-      expect(relayReconnectDelayMs(1), kRelayReconnectBaseMs << 1);
-      expect(relayReconnectDelayMs(2), kRelayReconnectBaseMs << 2);
-      expect(relayReconnectDelayMs(3), kRelayReconnectBaseMs << 3);
-      expect(relayReconnectDelayMs(4), kRelayReconnectBaseMs << 4);
+      expect(relayReconnectDelayMs(0), kRelayReconnectBaseMs);
+      expect(relayReconnectDelayMs(1), kRelayReconnectBaseMs * 2);
+      expect(relayReconnectDelayMs(2), kRelayReconnectBaseMs * 4);
+      expect(relayReconnectDelayMs(6), 32000);
+      expect(relayReconnectDelayMs(7), kRelayReconnectMaxDelayMs);
+      expect(relayReconnectDelayMs(99), kRelayReconnectMaxDelayMs);
     });
   });
 

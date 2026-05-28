@@ -15,24 +15,42 @@ import 'relay_client.dart';
 // Data types
 // ============================================
 
+/// How [EnvoyMeshContact] participates in Companion mesh UX.
+enum EnvoyMeshContactKind {
+  /// Home node's Phase 9K bridge agent (`envoy_agent_…`).
+  ///
+  /// [peerId] is [agentPeerId] for relay `forwardEnvelope`. [ownerId] is null
+  /// (not a remote human owner id; bridge is a mesh agent peer).
+  bridgeAgent,
+
+  /// Trust bond from `getBonds` ([BondRecord.peerOwnerId]).
+  ///
+  /// Prefer [BondRecord.libp2pPeerId] as [peerId] for outbound relay delivery —
+  /// the home node's `forwardEnvelope` dials libp2p transport IDs.
+  bondedHuman,
+}
+
 /// A contact discovered through the EnvoyMesh P2P mesh.
 class EnvoyMeshContact {
   final String peerId;
-  final String ownerId;
+  /// Bonded peer: remote `envoy:owner:…` · **null** for [EnvoyMeshContactKind.bridgeAgent].
+  final String? ownerId;
   final String? displayName;
-  /// "human" or "agent"
+  /// `"human"` or `"agent"` (UI / legacy).
   final String role;
+  final EnvoyMeshContactKind kind;
 
   const EnvoyMeshContact({
     required this.peerId,
-    required this.ownerId,
+    this.ownerId,
     this.displayName,
     this.role = 'human',
+    required this.kind,
   });
 
   @override
   String toString() =>
-      'EnvoyMeshContact(peerId: $peerId, displayName: $displayName, role: $role)';
+      'EnvoyMeshContact(kind: $kind, peerId: $peerId, displayName: $displayName, role: $role)';
 }
 
 /// A chat message received or sent through the P2P mesh.
@@ -100,6 +118,7 @@ class EnvoyNodeService {
   static const _keyHomeNodeUrl = 'envoy_home_node_url';
   static const _keyPrivateKeyPem = 'envoy_private_key_pem';
   static const _keyPairedNodeInfo = 'envoy_paired_node_info';
+  static const _keyReconnectThrottleMs = 'envoy_reconnect_wall_ms';
 
   // ---- Loaded identity ----
   String? _peerId;
@@ -181,15 +200,9 @@ class EnvoyNodeService {
   final StreamController<Map<String, dynamic>> _bridgeStatusController =
       StreamController<Map<String, dynamic>>.broadcast();
 
-  final StreamController<String> _homeClawCoreWsTextController =
-      StreamController<String>.broadcast();
-
   /// Home node `bridge:status` push events (same payload as periodic [discoverBridgeAgent] source).
   Stream<Map<String, dynamic>> get onBridgeStatusFromNode =>
       _bridgeStatusController.stream;
-
-  /// Forwarded UTF-8 text frames from Core `/ws` via the Envoy home node tunnel.
-  Stream<String> get onHomeClawCoreWsText => _homeClawCoreWsTextController.stream;
 
   // ============================================
   // Identity lifecycle
@@ -278,11 +291,6 @@ class EnvoyNodeService {
         pairingProbeToken: pairingWsToken,
         pairingRelayPeerId: pairingRelayPeerId,
         onEnvelope: _handleInboundEnvelope,
-        onHomeClawCoreWsText: (t) {
-          if (!_homeClawCoreWsTextController.isClosed) {
-            _homeClawCoreWsTextController.add(t);
-          }
-        },
         onStateChange: (state) {
           _statusChangeController.add(state);
         },
@@ -401,6 +409,59 @@ class EnvoyNodeService {
   Future<String?> getSavedHomeNodeUrl() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_keyHomeNodeUrl);
+  }
+
+  /// Dial saved EnvoyMesh pairing — used on startup / Core‑HTTP Envoy fallback when the relay dropped.
+  ///
+  /// Respect [minAttemptGap] so callers (e.g. HTTP retry loops) cannot stampede the handshake.
+  /// Pass [silentFailures] for fire‑and‑forget startup so errors do not crash the isolate.
+  Future<void> reconnectUsingSavedPairing({
+    Duration timeout = const Duration(seconds: 60),
+    Duration minAttemptGap = Duration.zero,
+    bool silentFailures = false,
+  }) async {
+    if (!isInitialized) {
+      await initialize();
+    }
+    if (isRelayConnected) return;
+
+    if (minAttemptGap > Duration.zero) {
+      final prefs = await SharedPreferences.getInstance();
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final last = prefs.getInt(_keyReconnectThrottleMs) ?? 0;
+      if (now - last < minAttemptGap.inMilliseconds) return;
+      await prefs.setInt(_keyReconnectThrottleMs, now);
+    }
+
+    final paired = await getPairedNodeInfo();
+    final savedUrl = await getSavedHomeNodeUrl();
+    final ws = ((paired?.wsUrl ?? savedUrl) ?? '').trim();
+    if (ws.isEmpty) return;
+
+    String? alt;
+    try {
+      alt = paired?.reconstructedDialWsUrl()?.trim();
+    } catch (_) {
+      alt = null;
+    }
+    try {
+      await disconnect();
+      await connect(
+        ws,
+        pairingWsToken: paired?.token,
+        pairingRelayPeerId: paired?.relayPeerId,
+        pairingAlternateDialUrl: (alt != null && alt.isNotEmpty && alt != ws) ? alt : null,
+      ).timeout(timeout);
+    } catch (e, st) {
+      try {
+        await disconnect();
+      } catch (_) {}
+      if (silentFailures) {
+        debugPrint('EnvoyMesh reconnectUsingSavedPairing: $e');
+        return;
+      }
+      Error.throwWithStackTrace(e, st);
+    }
   }
 
   // ============================================
@@ -566,9 +627,10 @@ class EnvoyNodeService {
 
     return EnvoyMeshContact(
       peerId: agentPeerId,
-      ownerId: _ownerId!,
+      ownerId: null,
       displayName: displayName,
       role: 'agent',
+      kind: EnvoyMeshContactKind.bridgeAgent,
     );
   }
 
@@ -632,32 +694,6 @@ class EnvoyNodeService {
     return http.Response.bytes(bodyOut, status, headers: hdr);
   }
 
-  /// Open the node→Core `/ws` tunnel (see [RelayClient.homeClawCoreWsOpen]).
-  Future<Map<String, dynamic>> homeClawCoreWsOpen({
-    required String pathWithQuery,
-    Duration timeout = const Duration(seconds: 45),
-  }) async {
-    _requireConnected();
-    return _client!.homeClawCoreWsOpen(
-      pathWithQuery: pathWithQuery,
-      timeout: timeout,
-    );
-  }
-
-  /// Send a UTF-8 text frame on the open Core `/ws` tunnel.
-  Future<Map<String, dynamic>> homeClawCoreWsSend({
-    required String text,
-    Duration timeout = const Duration(seconds: 30),
-  }) async {
-    _requireConnected();
-    return _client!.homeClawCoreWsSend(text: text, timeout: timeout);
-  }
-
-  /// Close the Core `/ws` tunnel on the paired home node.
-  Future<void> homeClawCoreWsClose() async {
-    await _client?.homeClawCoreWsClose();
-  }
-
   /// Get bonded contacts from the home node.
   ///
   /// Calls `getBonds` JSON-RPC and converts each bond to an
@@ -667,17 +703,33 @@ class EnvoyNodeService {
 
     try {
       final bonds = await _client!.getBonds();
-      return bonds.map((bond) {
-        return EnvoyMeshContact(
-          peerId: (bond['peerOwnerId'] as String?) ?? '',
-          ownerId: (bond['peerOwnerId'] as String?) ?? '',
-          displayName: bond['displayName'] as String?,
-          role: 'human',
-        );
-      }).where((c) => c.peerId.isNotEmpty).toList();
+      return bonds
+          .map((bond) {
+            final peerOwnerId =
+                (bond['peerOwnerId'] as String?)?.trim() ?? '';
+            if (peerOwnerId.isEmpty) return null;
+            final libp2p = (bond['libp2pPeerId'] as String?)?.trim();
+            final routingPeerId =
+                libp2p != null && libp2p.isNotEmpty ? libp2p : peerOwnerId;
+            return EnvoyMeshContact(
+              peerId: routingPeerId,
+              ownerId: peerOwnerId,
+              displayName: bond['displayName'] as String?,
+              role: 'human',
+              kind: EnvoyMeshContactKind.bondedHuman,
+            );
+          })
+          .whereType<EnvoyMeshContact>()
+          .toList();
     } catch (_) {
       return [];
     }
+  }
+
+  /// Home node [ConnectionStatus] (includes `lastError` / `lastErrorAt` when the node supports them).
+  Future<Map<String, dynamic>> getConnectionStatus() async {
+    _requireConnected();
+    return _client!.getConnectionStatus();
   }
 
   // ============================================
@@ -744,9 +796,6 @@ class EnvoyNodeService {
     } catch (_) {}
     try {
       await _bridgeStatusController.close();
-    } catch (_) {}
-    try {
-      await _homeClawCoreWsTextController.close();
     } catch (_) {}
   }
 }

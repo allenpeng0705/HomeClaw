@@ -11,6 +11,8 @@ See Design.md §3.6 (Plugins vs tools).
 
 from dataclasses import dataclass, field
 import asyncio
+import time
+import uuid
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from loguru import logger
@@ -328,6 +330,27 @@ class ToolRegistry:
         # [TOOL_CALL] / [TOOL_RESULT]: grep these in logs to see only tool/skill invocations and outcomes.
         args_redacted = redact_params_for_log(arguments) if isinstance(arguments, dict) else arguments
         logger.info("[TOOL_CALL] name={} parameters={}", name, args_redacted)
+
+        # ── Approval gate (Phase 5) ──────────────────────────────────
+        try:
+            from core.approvals.policy import build_policy_from_config, ApprovalDecision
+            from base.util import Util
+            _approval_cfg = getattr(Util().get_core_metadata(), "approval", None) or {}
+            if isinstance(_approval_cfg, dict) and _approval_cfg:
+                _policy = build_policy_from_config(_approval_cfg)
+                _decision = _policy.resolve(name)
+                if _decision == ApprovalDecision.DENY:
+                    logger.info("[TOOL_CALL] name={} DENIED_BY_POLICY", name)
+                    _audit_record(name, context, str(uuid.uuid4()), time.time(), "denied",
+                                  f"Denied by approval policy")
+                    return f"Error: tool '{name}' is denied by approval policy."
+        except Exception:
+            pass
+
+        # ── Audit gate (Phase 6) ──────────────────────────────────────
+        _audit_start = time.time()
+        _audit_event_id = str(uuid.uuid4())
+
         _trace_emit_event(
             event_type="tool_call_started",
             component="tool_registry",
@@ -348,6 +371,7 @@ class ToolRegistry:
                 if not is_error:
                     res_len = len(result) if isinstance(result, str) else 0
                     logger.debug("[TOOL_RESULT] name={} result_len={} status={} attempt={}", name, res_len, "ok", attempt)
+                    _audit_record(name, context, _audit_event_id, _audit_start, "ok", result)
                     _trace_emit_event(
                         event_type="tool_call_finished",
                         component="tool_registry",
@@ -365,6 +389,7 @@ class ToolRegistry:
                         can_retry = False
                 if not can_retry:
                     logger.debug("[TOOL_RESULT] name={} status={} attempt={}", name, "error", attempt)
+                    _audit_record(name, context, _audit_event_id, _audit_start, "error", result)
                     _trace_emit_event(
                         event_type="tool_call_finished",
                         component="tool_registry",
@@ -397,6 +422,7 @@ class ToolRegistry:
                 if not can_retry:
                     logger.exception("Tool {} failed after {} retries: {}", name, max_retries, e)
                     logger.debug("[TOOL_RESULT] name={} status=exception attempt={}", name, attempt)
+                    _audit_record(name, context, _audit_event_id, _audit_start, "exception", str(e))
                     _trace_emit_event(
                         event_type="tool_call_finished",
                         component="tool_registry",
@@ -417,7 +443,35 @@ class ToolRegistry:
                 )
                 if retry_delay > 0:
                     await asyncio.sleep(retry_delay)
+        _audit_record(name, context, _audit_event_id, _audit_start, "error", last_error)
         return f"Error running tool {name}: {last_error or 'unknown error'}"
+
+
+# ── Audit helper (Phase 6) ────────────────────────────────────────────
+
+
+def _audit_record(tool_name: str, context: ToolContext, event_id: str,
+                  start_time: float, status: str, result: Any) -> None:
+    """Record a tool execution audit event. Best-effort; never raises."""
+    try:
+        import uuid as _uuid
+        from core.tool_audit import ToolAuditEvent, record_event, init_audit_db
+        init_audit_db()
+        duration = (time.time() - start_time) * 1000
+        summary = (str(result)[:200] if isinstance(result, str) else str(result)[:200])
+        event = ToolAuditEvent(
+            event_id=event_id or str(_uuid.uuid4()),
+            tool_name=tool_name,
+            agent_id=getattr(context, "app_id", "") or "",
+            session_id=getattr(context, "session_id", "") or "",
+            user_id=getattr(context, "user_id", "") or "",
+            result_status=status,
+            result_summary=summary,
+            duration_ms=duration,
+        )
+        record_event(event)
+    except Exception:
+        pass
 
 
 # Global registry instance. Core (or bootstrap) can add built-in tools and plugin tools here.

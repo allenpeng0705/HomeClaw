@@ -573,4 +573,70 @@ def run_initialize(core: Any) -> None:
                 llm=LlamaCppLLM(),
                 graph_store=graph_store,
             )
+        memory_hierarchical_enabled = getattr(meta, "memory_hierarchical_enabled", False)
+        if memory_hierarchical_enabled and hasattr(core, "mem_instance") and core.mem_instance:
+            try:
+                from memory.memory_hierarchy import HierarchicalMemory, CompositeScorer, LRUEvictionPolicy
+
+                core.mem_instance = HierarchicalMemory(
+                    backend=core.mem_instance,
+                    scorer=CompositeScorer(),
+                    eviction_policy=LRUEvictionPolicy(),
+                )
+                logger.debug("core init: hierarchical memory enabled")
+            except Exception as e:
+                logger.warning("Failed to enable hierarchical memory: {}. Using base memory.", e)
     logger.debug("core init: memory backend done")
+
+    # ── MemoryPlugin registration (Phase 1–2) ─────────────────────────
+    # Wire the active memory backend into the single-slot MemoryPlugin system
+    # so ContextEngine.assemble() and hooks can use it.
+    _register_memory_plugin_from_backend(core, memory_backend)
+
+
+def _register_memory_plugin_from_backend(core: Any, memory_backend: str) -> None:
+    """Create and register the appropriate MemoryPlugin adapter for the active backend."""
+    try:
+        from core.memory_plugin.slot import register_memory_plugin
+        from core.memory_plugin.composite_adapter import CompositeMemoryPlugin
+        from core.memory_plugin.cognee_adapter import CogneeMemoryPlugin
+        from core.memory_plugin.memos_adapter import MemosMemoryPlugin
+
+        mem = getattr(core, "mem_instance", None)
+        if mem is None:
+            logger.debug("MemoryPlugin: no mem_instance on core, skipping registration")
+            return
+
+        # Respect explicit memory_plugin config override, else auto-detect from memory_backend
+        plugin_id = ""
+        try:
+            meta = Util().get_core_metadata()
+            plugin_id = (getattr(meta, "memory_plugin", None) or "").strip().lower()
+        except Exception:
+            pass
+
+        plugin = None
+        if plugin_id == "composite":
+            plugin = CompositeMemoryPlugin(mem)
+        elif plugin_id == "cognee":
+            plugin = CogneeMemoryPlugin(mem)
+        elif plugin_id == "memos":
+            plugin = MemosMemoryPlugin(mem)
+        elif plugin_id == "chroma":
+            plugin = CompositeMemoryPlugin(mem)  # chroma/chroma-based Memory uses same interface
+        elif memory_backend == "composite":
+            plugin = CompositeMemoryPlugin(mem)
+        elif memory_backend == "cognee":
+            plugin = CogneeMemoryPlugin(mem)
+        elif memory_backend == "memos":
+            plugin = MemosMemoryPlugin(mem)
+        else:
+            plugin = CompositeMemoryPlugin(mem)
+
+        if plugin is not None:
+            register_memory_plugin(plugin, owner="core")
+            logger.info("MemoryPlugin '{}' activated for backend '{}'{}",
+                        plugin.plugin_id, memory_backend,
+                        f" (override: memory_plugin={plugin_id})" if plugin_id else "")
+    except Exception as e:
+        logger.debug("MemoryPlugin registration skipped: {}", e)

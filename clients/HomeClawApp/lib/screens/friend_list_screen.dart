@@ -21,6 +21,7 @@ import 'friend_requests_screen.dart';
 import 'login_screen.dart';
 import 'clawcode_screen.dart';
 import 'settings_screen.dart';
+import 'task_list_screen.dart';
 
 /// Bundled preset thumbnail assets (used when Core does not serve one). No download; shipped with app.
 const Set<String> _bundledPresetKeys = {'reminder', 'note', 'finder', 'cursor', 'knowledge'};
@@ -333,12 +334,12 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
             MaterialPageRoute(
               builder: (context) => ChatScreen(
                 coreService: widget.coreService,
-                userId: sessionUserId ?? bridgeAgent.ownerId,
+                userId: sessionUserId ?? bridgeAgent.peerId,
                 userName: bridgeAgent.displayName ?? 'My Agent',
                 friendId: bridgeAgent.peerId,
                 isP2pPeer: true,
                 p2pRecipientPeerId: bridgeAgent.peerId,
-                p2pRecipientOwnerId: bridgeAgent.ownerId,
+                p2pRecipientOwnerId: null,
               ),
             ),
           );
@@ -426,6 +427,15 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
             },
             tooltip: 'Friend requests',
           ),
+          IconButton(
+            icon: const Icon(Icons.assignment),
+            tooltip: 'Tasks',
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => TaskListScreen(coreService: widget.coreService),
+              ));
+            },
+          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             tooltip: 'More',
@@ -433,6 +443,11 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
               switch (value) {
                 case 'refresh':
                   if (!friendListState.loading) _loadFriends();
+                  break;
+                case 'tasks':
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => TaskListScreen(coreService: widget.coreService),
+                  ));
                   break;
                 case 'settings':
                   Navigator.push(
@@ -448,6 +463,7 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
               }
             },
             itemBuilder: (context) => [
+              const PopupMenuItem(value: 'tasks', child: Row(children: [Icon(Icons.assignment, size: 20), SizedBox(width: 16), Text('Tasks')])),
               PopupMenuItem(value: 'refresh', enabled: !friendListState.loading, child: Row(children: [const Icon(Icons.refresh, size: 20), const SizedBox(width: 16), Text(l10n.refreshFriends)])),
               const PopupMenuItem(value: 'settings', child: Row(children: [Icon(Icons.settings, size: 20), SizedBox(width: 16), Text('Settings')])),
               PopupMenuItem(value: 'logout', child: Row(children: [const Icon(Icons.logout, size: 20), const SizedBox(width: 16), Text(l10n.logOut)])),
@@ -464,7 +480,7 @@ class _FriendListScreenState extends ConsumerState<FriendListScreen> {
             id: 'p2p_agent_${bridge.peerId}',
             name: bridge.displayName ?? 'My Agent',
             type: 'p2p_agent',
-            userId: bridge.ownerId,
+            userId: bridge.peerId,
           ));
         }
         displayFriends.addAll(friendListState.friends);

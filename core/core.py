@@ -1267,7 +1267,7 @@ class Core(CoreInterface):
                                 )
                             elif text or imgs:
                                 await self.deliver_to_user(uid, text or "", images=imgs, source="inbound", from_friend="HomeClaw")
-                                logger.info("Core: response delivered to user (inbound/Companion) user_id={}", uid)
+                                logger.debug("Core: response delivered to user (inbound/Companion) user_id={}", uid)
                         except Exception as e:
                             logger.warning("deliver_to_user for inbound response failed: {}", e)
                         logger.debug("Skip get_response POST for inbound channel {} (host=inbound port=0).", response.from_channel)

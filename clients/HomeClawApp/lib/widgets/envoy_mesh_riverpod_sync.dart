@@ -42,6 +42,9 @@ class _EnvoyMeshRiverpodSyncState extends ConsumerState<EnvoyMeshRiverpodSync> {
           notifier.setConnected(url);
         }
         unawaited(_refreshContacts(notifier));
+      } else if (state == RelayClientState.connecting ||
+          state == RelayClientState.reconnectBackoff) {
+        notifier.setConnectionStatus(state);
       } else if (state == RelayClientState.disconnected ||
           state == RelayClientState.error) {
         notifier.setDisconnected();

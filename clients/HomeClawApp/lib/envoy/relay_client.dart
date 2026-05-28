@@ -22,13 +22,31 @@ const Duration kRelaySinkCloseTimeout = Duration(seconds: 2);
 /// Base delay in ms for [RelayClient] reconnect backoff.
 const int kRelayReconnectBaseMs = 500;
 
-/// Max reconnect attempts before error state.
-const int kRelayReconnectMaxAttempts = 5;
+/// Ceiling between reconnect attempts — exponential backoff never exceeds this gap.
+const int kRelayReconnectMaxDelayMs = 60000;
 
-/// Reconnect delay for attempt index `0..n-1` (same formula as [RelayClient._scheduleReconnect]).
+/// How often [_heartbeatMaybeSend] evaluates (fine-grained idle vs active intervals).
+const Duration kRelayHeartbeatTickerInterval = Duration(seconds: 12);
+
+/// Traffic newer than this uses the tighter heartbeat cadence ([kRelayHeartbeatActiveInterval]).
+const Duration kRelayHeartbeatTrafficFreshWindow = Duration(minutes: 2);
+
+const Duration kRelayHeartbeatActiveInterval = Duration(seconds: 30);
+
+const Duration kRelayHeartbeatIdleInterval = Duration(seconds: 120);
+
+/// Reconnect delay **before attempt** `attemptIndex` (0-based scheduled try):
+/// doubling from [kRelayReconnectBaseMs], capped by [kRelayReconnectMaxDelayMs].
 int relayReconnectDelayMs(int attemptIndex) {
-  final i = attemptIndex < 0 ? 0 : attemptIndex;
-  return kRelayReconnectBaseMs * (1 << i);
+  var i = attemptIndex < 0 ? 0 : attemptIndex;
+  var ms = kRelayReconnectBaseMs;
+  var doubled = 0;
+  while (doubled < i && ms < kRelayReconnectMaxDelayMs) {
+    final next = ms * 2;
+    ms = next > kRelayReconnectMaxDelayMs ? kRelayReconnectMaxDelayMs : next;
+    doubled++;
+  }
+  return ms;
 }
 
 /// WebSocket payloads may arrive as UTF-8 [List<int>] (not only [String]); return JSON text or null.
@@ -74,19 +92,8 @@ void relayDispatchServerPush(
   Map<String, dynamic> msg, {
   void Function(Map<String, dynamic> envelope, String remotePeerId)? onEnvelope,
   void Function(Map<String, dynamic> data)? onBridgeStatus,
-  void Function(String text)? onHomeClawCoreWsText,
 }) {
   final event = msg['event'] as String?;
-  if (event == 'homeclawCoreWs:rx') {
-    final data = msg['data'];
-    if (data is Map) {
-      final t = data['text'];
-      if (t != null && t.toString().isNotEmpty) {
-        onHomeClawCoreWsText?.call(t.toString());
-      }
-    }
-    return;
-  }
   if (event == 'p2p:envelope') {
     final data = msg['data'] as Map<String, dynamic>?;
     if (data != null) {
@@ -107,7 +114,14 @@ void relayDispatchServerPush(
 }
 
 /// Connection states for the relay client.
-enum RelayClientState { disconnected, connecting, connected, error }
+enum RelayClientState {
+  disconnected,
+  connecting,
+  /// Waiting before the next automatic reconnect attempt (idle backoff).
+  reconnectBackoff,
+  connected,
+  error,
+}
 
 /// A WebSocket-based relay client that connects to an EnvoyMesh home node
 /// and acts as a remote P2P peer with its own Ed25519 identity.
@@ -132,6 +146,8 @@ class RelayClient {
   Timer? _heartbeatTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
+  DateTime? _lastRelayTrafficAt;
+  DateTime? _lastHeartbeatPingSentAt;
 
   /// Set by [EnvoyNodeService] after JSON-RPC probes succeed ([enablePeriodicKeepalive]).
   bool _wantKeepalive = false;
@@ -160,9 +176,6 @@ class RelayClient {
   /// Called when the home node pushes `bridge:status` (bridge enabled/disabled, etc.).
   final void Function(Map<String, dynamic> data)? onBridgeStatus;
 
-  /// Core `/ws` text frames forwarded from the node (when using the Envoy tunnel WS).
-  final void Function(String text)? onHomeClawCoreWsText;
-
   RelayClient({
     required this.url,
     required this.peerId,
@@ -175,7 +188,6 @@ class RelayClient {
     this.onEnvelope,
     this.onStateChange,
     this.onBridgeStatus,
-    this.onHomeClawCoreWsText,
   })  : connectHeaders = (connectHeaders == null || connectHeaders.isEmpty)
             ? null
             : Map<String, dynamic>.from(connectHeaders),
@@ -195,8 +207,10 @@ class RelayClient {
   ///
   /// On handshake or protocol errors throws so callers (e.g. pairing) can
   /// surface a real failure. Automatic reconnect runs only after a connection
-  /// was established and later dropped ([_handleDisconnect]).
-  Future<void> connect() async {
+  /// was established and later dropped ([_handleDisconnect]); those attempts use
+  /// [fromAutoReconnect] so backoff can continue instead of flipping to fatal
+  /// [RelayClientState.error] on the first failed handshake.
+  Future<void> connect({bool fromAutoReconnect = false}) async {
     if (_state == RelayClientState.connected) return;
 
     _setState(RelayClientState.connecting);
@@ -214,6 +228,9 @@ class RelayClient {
 
       _setState(RelayClientState.connected);
       _reconnectAttempts = 0;
+      final nowWall = DateTime.now();
+      _lastRelayTrafficAt = nowWall;
+      _lastHeartbeatPingSentAt = null;
 
       _subscription = _channel!.stream.listen(
         _handleMessage,
@@ -240,6 +257,10 @@ class RelayClient {
         }
       } catch (_) {}
       _channel = null;
+      if (fromAutoReconnect && _wantKeepalive) {
+        _setState(RelayClientState.disconnected);
+        return;
+      }
       _setState(RelayClientState.error);
       Error.throwWithStackTrace(e, st);
     }
@@ -247,16 +268,12 @@ class RelayClient {
 
   /// Disconnect and clean up.
   Future<void> disconnect() async {
-    if (_channel != null && _state == RelayClientState.connected) {
-      try {
-        await homeClawCoreWsClose(timeout: const Duration(seconds: 3));
-      } catch (_) {}
-    }
     _wantKeepalive = false;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _reconnectAttempts = 0;
     _subscription?.cancel();
     _subscription = null;
     final sink = _channel?.sink;
@@ -320,7 +337,7 @@ class RelayClient {
   }
 
   /// True when wire error looks like JSON-RPC `-32601` method not found.
-  static bool looksLikeRpcMethodNotFound(Object e) {
+  static bool _looksLikeRpcMethodNotFound(Object e) {
     if (e is TimeoutException) return false;
     final s = e.toString().toLowerCase();
     return s.contains('32601') ||
@@ -390,7 +407,7 @@ class RelayClient {
           return relayProbePayloadAsStatusMap(r, meth);
         } catch (e, st) {
           last = e;
-          if (looksLikeRpcMethodNotFound(e)) continue outer;
+          if (_looksLikeRpcMethodNotFound(e)) continue outer;
           // Relay dropped socket (or `_channel` cleared) mid-probe; next param style needs a fresh WS.
           final hasMoreParamStyles = pi + 1 < variants.length;
           if (hasMoreParamStyles &&
@@ -439,29 +456,57 @@ class RelayClient {
   }
 
   void _scheduleReconnect() {
-    if (_reconnectAttempts >= kRelayReconnectMaxAttempts) {
-      _setState(RelayClientState.error);
-      return;
-    }
-    _setState(RelayClientState.connecting);
-    final delay = kRelayReconnectBaseMs * (1 << _reconnectAttempts);
-    _reconnectAttempts++;
+    _setState(RelayClientState.reconnectBackoff);
+    final idx = _reconnectAttempts++;
+    final delayMs = relayReconnectDelayMs(idx);
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(Duration(milliseconds: delay), () {
-      connect();
+    _reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
+      unawaited(_runScheduledReconnectAttempt());
     });
+  }
+
+  /// One backoff reconnect try; schedules another timer on failure ([connect] errors are swallowed).
+  Future<void> _runScheduledReconnectAttempt() async {
+    try {
+      await connect(fromAutoReconnect: true);
+    } catch (_) {
+      /* connect should not throw when fromAutoReconnect; guard anyway */
+    }
+    if (!_wantKeepalive) return;
+    if (_state == RelayClientState.connected) return;
+    _scheduleReconnect();
+  }
+
+  void _notifyRelayTraffic() {
+    _lastRelayTrafficAt = DateTime.now();
   }
 
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      final idStr = '${_nextRpcId++}';
-      _sendJson(_jsonRpcRequest(
-        id: idStr,
-        method: _keepaliveRpcMethod,
-        params: _keepaliveRpcParams,
-      ));
-    });
+    _heartbeatTimer =
+        Timer.periodic(kRelayHeartbeatTickerInterval, (_) => _heartbeatMaybeSend());
+    _heartbeatMaybeSend();
+  }
+
+  void _heartbeatMaybeSend() {
+    if (!_wantKeepalive || _channel == null) return;
+    final now = DateTime.now();
+    final lastTraffic = _lastRelayTrafficAt ?? now;
+    final idle = now.difference(lastTraffic);
+    final pingEvery = idle >= kRelayHeartbeatTrafficFreshWindow
+        ? kRelayHeartbeatIdleInterval
+        : kRelayHeartbeatActiveInterval;
+    final lastPing = _lastHeartbeatPingSentAt;
+    if (lastPing != null && now.difference(lastPing) < pingEvery) {
+      return;
+    }
+    _lastHeartbeatPingSentAt = now;
+    final idStr = '${_nextRpcId++}';
+    _sendJson(_jsonRpcRequest(
+      id: idStr,
+      method: _keepaliveRpcMethod,
+      params: _keepaliveRpcParams,
+    ));
   }
 
   void _dispatchOneDecoded(dynamic decoded) {
@@ -499,7 +544,6 @@ class RelayClient {
         msg,
         onEnvelope: onEnvelope,
         onBridgeStatus: onBridgeStatus,
-        onHomeClawCoreWsText: onHomeClawCoreWsText,
       );
       return;
     }
@@ -525,6 +569,7 @@ class RelayClient {
     try {
       final text = relayDecodeWsText(raw);
       if (text == null) return;
+      _notifyRelayTraffic();
       dynamic decoded = jsonDecode(text);
       _dispatchOneDecoded(decoded);
     } catch (_) {
@@ -547,6 +592,7 @@ class RelayClient {
     Duration timeout = const Duration(seconds: 30),
   }) async {
     if (_channel == null) throw StateError('not connected');
+    _notifyRelayTraffic();
     // String wire ids: some home-node relays reject numeric JSON-RPC `id` values.
     final idStr = '${_nextRpcId++}';
     final corr = relayWireCorrKey(idStr);
@@ -582,7 +628,6 @@ class RelayClient {
       'path': path,
       if (headers != null && headers.isNotEmpty) 'headers': headers,
       if (bodyBytes != null && bodyBytes.isNotEmpty) 'bodyBase64': base64Encode(bodyBytes),
-      'timeoutMs': timeout.inMilliseconds.clamp(1000, 14400 * 1000),
     };
     Object? last;
     for (final meth in ['homeclawCoreProxy', 'homeclaw_core_proxy']) {
@@ -593,76 +638,11 @@ class RelayClient {
         throw StateError('homeclawCoreProxy: unexpected result type ${r.runtimeType}');
       } catch (e) {
         last = e;
-        if (meth == 'homeclawCoreProxy' && looksLikeRpcMethodNotFound(e)) continue;
+        if (meth == 'homeclawCoreProxy' && _looksLikeRpcMethodNotFound(e)) continue;
         rethrow;
       }
     }
     throw StateError('homeclawCoreProxy failed (${last ?? 'unknown'})');
-  }
-
-  /// Open an Envoy-mediated WebSocket tunnel to Core `/ws` (node dials LAN Core).
-  Future<Map<String, dynamic>> homeClawCoreWsOpen({
-    required String pathWithQuery,
-    Duration timeout = const Duration(seconds: 45),
-  }) async {
-    final pq = pathWithQuery.trim().startsWith('/')
-        ? pathWithQuery.trim()
-        : '/${pathWithQuery.trim()}';
-    final params = <String, dynamic>{'pathWithQuery': pq};
-    Object? last;
-    for (final meth in ['homeClawCoreWsOpen', 'home_claw_core_ws_open']) {
-      try {
-        final r = await _rpc(meth, params, timeout: timeout);
-        if (r is Map<String, dynamic>) return r;
-        if (r is Map) return Map<String, dynamic>.from(r);
-        throw StateError('homeClawCoreWsOpen: unexpected result type ${r.runtimeType}');
-      } catch (e) {
-        last = e;
-        if (meth == 'homeClawCoreWsOpen' && looksLikeRpcMethodNotFound(e)) continue;
-        rethrow;
-      }
-    }
-    throw StateError('homeClawCoreWsOpen failed (${last ?? 'unknown'})');
-  }
-
-  /// Send a UTF-8 text frame on the Core WS tunnel opened by [homeClawCoreWsOpen].
-  Future<Map<String, dynamic>> homeClawCoreWsSend({
-    required String text,
-    Duration timeout = const Duration(seconds: 30),
-  }) async {
-    final params = <String, dynamic>{'text': text};
-    Object? last;
-    for (final meth in ['homeClawCoreWsSend', 'home_claw_core_ws_send']) {
-      try {
-        final r = await _rpc(meth, params, timeout: timeout);
-        if (r is Map<String, dynamic>) return r;
-        if (r is Map) return Map<String, dynamic>.from(r);
-        throw StateError('homeClawCoreWsSend: unexpected result type ${r.runtimeType}');
-      } catch (e) {
-        last = e;
-        if (meth == 'homeClawCoreWsSend' && looksLikeRpcMethodNotFound(e)) continue;
-        rethrow;
-      }
-    }
-    throw StateError('homeClawCoreWsSend failed (${last ?? 'unknown'})');
-  }
-
-  /// Close Core `/ws` tunnel on the node.
-  Future<void> homeClawCoreWsClose({
-    Duration timeout = const Duration(seconds: 6),
-  }) async {
-    if (_channel == null || _state != RelayClientState.connected) return;
-    for (final meth in ['homeClawCoreWsClose', 'home_claw_core_ws_close']) {
-      try {
-        await _rpc(meth, null, timeout: timeout);
-        return;
-      } catch (e) {
-        if (meth == 'homeClawCoreWsClose' && looksLikeRpcMethodNotFound(e)) {
-          continue;
-        }
-        return;
-      }
-    }
   }
 
   /// Forward a pre-signed envelope into the P2P mesh.
@@ -681,7 +661,7 @@ class RelayClient {
       await _rpc('forwardEnvelope', params);
       return;
     } catch (e) {
-      if (!looksLikeRpcMethodNotFound(e)) rethrow;
+      if (!_looksLikeRpcMethodNotFound(e)) rethrow;
     }
     await _rpc('forward_envelope', params);
   }
@@ -728,7 +708,7 @@ class RelayClient {
       if (r is Map) return Map<String, dynamic>.from(r);
       throw StateError('getBridgeStatus: unexpected result type ${r.runtimeType}');
     } catch (e) {
-      if (!looksLikeRpcMethodNotFound(e)) rethrow;
+      if (!_looksLikeRpcMethodNotFound(e)) rethrow;
     }
     final r = await _rpc('get_bridge_status', null);
     if (r is Map<String, dynamic>) return r;
@@ -761,7 +741,7 @@ class RelayClient {
         );
       } catch (e) {
         last = e;
-        if (looksLikeRpcMethodNotFound(e)) continue;
+        if (_looksLikeRpcMethodNotFound(e)) continue;
         rethrow;
       }
     }
@@ -776,7 +756,7 @@ class RelayClient {
       if (r is Map) return Map<String, dynamic>.from(r);
       throw StateError('getNodeConfig: unexpected result type ${r.runtimeType}');
     } catch (e) {
-      if (!looksLikeRpcMethodNotFound(e)) rethrow;
+      if (!_looksLikeRpcMethodNotFound(e)) rethrow;
     }
     final r = await _rpc('get_node_config', null);
     if (r is Map<String, dynamic>) return r;
@@ -796,7 +776,7 @@ class RelayClient {
       r = await _rpc('getBonds', null);
       return _normalizeBondsResult(r);
     } catch (e) {
-      if (!looksLikeRpcMethodNotFound(e)) rethrow;
+      if (!_looksLikeRpcMethodNotFound(e)) rethrow;
     }
     r = await _rpc('get_bonds', null);
     return _normalizeBondsResult(r);
@@ -813,6 +793,26 @@ class RelayClient {
       }
     }
     return out;
+  }
+
+  /// JSON-RPC [getConnectionStatus] from the home node (online, relays, `lastError`, …).
+  Future<Map<String, dynamic>> getConnectionStatus() async {
+    try {
+      final r = await _rpc('getConnectionStatus', null);
+      if (r is Map<String, dynamic>) return r;
+      if (r is Map) return Map<String, dynamic>.from(r);
+      throw StateError(
+        'getConnectionStatus: unexpected result type ${r.runtimeType}',
+      );
+    } catch (e) {
+      if (!_looksLikeRpcMethodNotFound(e)) rethrow;
+    }
+    final r = await _rpc('get_connection_status', null);
+    if (r is Map<String, dynamic>) return r;
+    if (r is Map) return Map<String, dynamic>.from(r);
+    throw StateError(
+      'getConnectionStatus (get_connection_status): unexpected result type ${r.runtimeType}',
+    );
   }
 
   /// Build, sign, and send a device.pair.request envelope through the relay.

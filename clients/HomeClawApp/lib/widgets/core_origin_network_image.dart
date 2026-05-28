@@ -4,8 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../core_service.dart';
 
-/// [Image.network], or fetches through the Envoy tunnel when [coreService.coreHttpTunnelActive]
-/// and [imageUrl] shares the same origin as Companion's Core URL (relay-only phones).
+/// [Image.network], or fetch through Envoy when tunnel routing applies (same Core origin).
 class CoreOriginNetworkImage extends StatelessWidget {
   final CoreService coreService;
   final String imageUrl;

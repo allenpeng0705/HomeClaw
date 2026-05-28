@@ -26,9 +26,10 @@ class FakeEnvoyNodeForCoreWs extends EnvoyNodeService {
   final List<String> sentTexts = [];
   bool openReturnsOk = true;
   bool sendReturnsOk = true;
+  bool relayConnected = true;
 
   @override
-  bool get isRelayConnected => true;
+  bool get isRelayConnected => relayConnected;
 
   @override
   Stream<String> get onHomeClawCoreWsText => _wsText.stream;
@@ -121,13 +122,13 @@ void main() {
 
   tearDown(() {
     CoreService.testOverrideCoreWsHandshakeTimeout = null;
+    CoreService.testCompanionCoreUrlGloballyReachable = null;
   });
 
-  test('Core /ws uses Envoy tunnel when routing on and relay is connected', () async {
+  test('Core /ws uses Envoy tunnel when relay is connected', () async {
     SharedPreferences.setMockInitialValues({
       'core_base_url': 'http://127.0.0.1:$loopbackPort',
       'core_api_key': 'test-key',
-      'core_http_via_envoy': true,
     });
 
     final fake = FakeEnvoyNodeForCoreWs();
@@ -153,14 +154,13 @@ void main() {
     await fake.dispose();
   });
 
-  test('Core /ws does not call homeClawCoreWsOpen when Envoy HTTP routing is off', () async {
+  test('Core /ws does not call homeClawCoreWsOpen when relay is disconnected', () async {
     SharedPreferences.setMockInitialValues({
       'core_base_url': 'http://127.0.0.1:$loopbackPort',
       'core_api_key': 'k',
-      'core_http_via_envoy': false,
     });
 
-    final fake = FakeEnvoyNodeForCoreWs();
+    final fake = FakeEnvoyNodeForCoreWs()..relayConnected = false;
     final core = CoreService();
     await core.loadSettings();
     core.bindEnvoyForCoreHttp(fake);
@@ -175,12 +175,36 @@ void main() {
     await fake.dispose();
   });
 
+  test(
+      'Core /ws skips Envoy when Core URL is treated as globally reachable',
+      () async {
+    SharedPreferences.setMockInitialValues({
+      'core_base_url': 'http://127.0.0.1:$loopbackPort',
+      'core_api_key': 'k',
+    });
+
+    CoreService.testCompanionCoreUrlGloballyReachable = true;
+
+    final fake = FakeEnvoyNodeForCoreWs();
+    final core = CoreService();
+    await core.loadSettings();
+    core.bindEnvoyForCoreHttp(fake);
+
+    await core.testEnsureCoreWsConnectedForCompanion('bob');
+
+    expect(fake.openCount, 0);
+    expect(core.testDebugCoreWsUsesCompanionTunnel, false);
+    expect(core.testDebugCoreWsSessionId, 'loopback-sid');
+
+    await core.testTearDownCoreWebSocketForCompanion();
+    await fake.dispose();
+  });
+
   test('Core /ws closes tunnel and falls back when homeClawCoreWsOpen returns ok: false',
       () async {
     SharedPreferences.setMockInitialValues({
       'core_base_url': 'http://127.0.0.1:$loopbackPort',
       'core_api_key': 'k',
-      'core_http_via_envoy': true,
     });
 
     final fake = FakeEnvoyNodeForCoreWs()..openReturnsOk = false;
@@ -203,7 +227,6 @@ void main() {
     SharedPreferences.setMockInitialValues({
       'core_base_url': 'http://127.0.0.1:$loopbackPort',
       'core_api_key': 'k',
-      'core_http_via_envoy': true,
     });
 
     final fake = FakeEnvoyNodeForCoreWs()..sendReturnsOk = false;

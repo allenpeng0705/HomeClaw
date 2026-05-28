@@ -66,6 +66,15 @@ void main() {
       expect(notifier.state.isConnected, isFalse);
     });
 
+    test('setConnectionStatus can set reconnectBackoff while keeping URL', () {
+      final notifier = EnvoyMeshNotifier();
+      notifier.setConnected('ws://home:3030/ws');
+      notifier.setConnectionStatus(RelayClientState.reconnectBackoff);
+      expect(notifier.state.connectionStatus, RelayClientState.reconnectBackoff);
+      expect(notifier.state.homeNodeUrl, 'ws://home:3030/ws');
+      expect(notifier.state.isConnected, isFalse);
+    });
+
     test('setError sets error status and message', () {
       final notifier = EnvoyMeshNotifier();
       notifier.setError('Connection refused');
@@ -94,12 +103,14 @@ void main() {
           peerId: 'envoy_peer1',
           ownerId: 'envoy:owner:peer1',
           displayName: 'Alice',
+          kind: EnvoyMeshContactKind.bondedHuman,
         ),
         const EnvoyMeshContact(
           peerId: 'envoy_agent_1',
-          ownerId: 'envoy:owner:abc',
+          ownerId: null,
           displayName: 'My Agent',
           role: 'agent',
+          kind: EnvoyMeshContactKind.bridgeAgent,
         ),
       ];
       notifier.setContacts(contacts);
@@ -136,9 +147,10 @@ void main() {
       notifier.setContacts([
         const EnvoyMeshContact(
           peerId: 'envoy_agent',
-          ownerId: 'envoy:owner:abc',
+          ownerId: null,
           displayName: 'My Agent',
           role: 'agent',
+          kind: EnvoyMeshContactKind.bridgeAgent,
         ),
       ]);
       expect(notifier.state.bridgeAgentContact, isNotNull);
@@ -165,9 +177,10 @@ void main() {
 
       final bridge = const EnvoyMeshContact(
         peerId: 'envoy_agent_abc',
-        ownerId: 'envoy:owner:abc',
+        ownerId: null,
         displayName: 'My Agent',
         role: 'agent',
+        kind: EnvoyMeshContactKind.bridgeAgent,
       );
 
       final display = <FriendEntry>[];
@@ -176,7 +189,7 @@ void main() {
           id: 'p2p_agent_${bridge.peerId}',
           name: bridge.displayName ?? 'My Agent',
           type: 'p2p_agent',
-          userId: bridge.ownerId,
+          userId: bridge.peerId,
         ));
       }
       display.addAll(friends);
@@ -184,7 +197,7 @@ void main() {
       expect(display.length, 3);
       expect(display[0].type, 'p2p_agent');
       expect(display[0].name, 'My Agent');
-      expect(display[0].userId, 'envoy:owner:abc');
+      expect(display[0].userId, 'envoy_agent_abc');
       expect(display[1].name, 'HomeClaw');
       expect(display[2].name, 'Reminder');
     });
@@ -202,7 +215,7 @@ void main() {
           id: 'p2p_agent_${bridge.peerId}',
           name: bridge.displayName ?? 'My Agent',
           type: 'p2p_agent',
-          userId: bridge.ownerId,
+          userId: bridge.peerId,
         ));
       }
       display.addAll(friends);
@@ -214,15 +227,16 @@ void main() {
     test('bridge agent without displayName uses default', () {
       const bridge = EnvoyMeshContact(
         peerId: 'envoy_agent_xyz',
-        ownerId: 'envoy:owner:xyz',
+        ownerId: null,
         role: 'agent',
+        kind: EnvoyMeshContactKind.bridgeAgent,
       );
 
       final entry = FriendEntry(
         id: 'p2p_agent_${bridge.peerId}',
         name: bridge.displayName ?? 'My Agent',
         type: 'p2p_agent',
-        userId: bridge.ownerId,
+        userId: bridge.peerId,
       );
 
       expect(entry.name, 'My Agent');
@@ -236,18 +250,21 @@ void main() {
           ownerId: 'envoy:owner:peer1',
           displayName: 'Alice',
           role: 'human',
+          kind: EnvoyMeshContactKind.bondedHuman,
         ),
         const EnvoyMeshContact(
           peerId: 'envoy_agent_1',
-          ownerId: 'envoy:owner:abc',
+          ownerId: null,
           displayName: 'My Agent',
           role: 'agent',
+          kind: EnvoyMeshContactKind.bridgeAgent,
         ),
         const EnvoyMeshContact(
           peerId: 'envoy_peer2',
           ownerId: 'envoy:owner:peer2',
           displayName: 'Bob',
           role: 'human',
+          kind: EnvoyMeshContactKind.bondedHuman,
         ),
       ]);
 
@@ -284,6 +301,11 @@ void main() {
         isFalse,
       );
       expect(
+        const EnvoyMeshState(connectionStatus: RelayClientState.reconnectBackoff)
+            .isConnected,
+        isFalse,
+      );
+      expect(
         const EnvoyMeshState(connectionStatus: RelayClientState.error)
             .isConnected,
         isFalse,
@@ -296,6 +318,7 @@ void main() {
           peerId: 'envoy_peer1',
           ownerId: 'envoy:owner:peer1',
           displayName: 'Alice',
+          kind: EnvoyMeshContactKind.bondedHuman,
         ),
       ]);
       expect(state.bridgeAgentContact, isNull);
@@ -310,8 +333,9 @@ void main() {
       final state = EnvoyMeshState(contacts: [
         const EnvoyMeshContact(
           peerId: 'envoy_agent_1',
-          ownerId: 'envoy:owner:abc',
+          ownerId: null,
           role: 'agent',
+          kind: EnvoyMeshContactKind.bridgeAgent,
         ),
       ]);
       expect(state.humanContacts, isEmpty);
@@ -350,6 +374,7 @@ void main() {
       const contact = EnvoyMeshContact(
         peerId: 'envoy_abc',
         ownerId: 'envoy:owner:abc',
+        kind: EnvoyMeshContactKind.bondedHuman,
       );
       expect(contact.role, 'human');
     });
@@ -357,9 +382,10 @@ void main() {
     test('agent role is stored explicitly', () {
       const contact = EnvoyMeshContact(
         peerId: 'envoy_agent_abc',
-        ownerId: 'envoy:owner:abc',
+        ownerId: null,
         displayName: 'My Agent',
         role: 'agent',
+        kind: EnvoyMeshContactKind.bridgeAgent,
       );
       expect(contact.role, 'agent');
     });
@@ -369,6 +395,7 @@ void main() {
         peerId: 'envoy_abc',
         ownerId: 'envoy:owner:abc',
         displayName: 'Alice',
+        kind: EnvoyMeshContactKind.bondedHuman,
       );
       expect(contact.toString(), contains('Alice'));
     });
@@ -376,9 +403,10 @@ void main() {
     test('toString for agent role', () {
       const contact = EnvoyMeshContact(
         peerId: 'envoy_agent_abc',
-        ownerId: 'envoy:owner:abc',
+        ownerId: null,
         displayName: 'My Agent',
         role: 'agent',
+        kind: EnvoyMeshContactKind.bridgeAgent,
       );
       expect(contact.toString(), contains('agent'));
     });

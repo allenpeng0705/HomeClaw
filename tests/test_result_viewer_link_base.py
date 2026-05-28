@@ -1,5 +1,6 @@
 """File link base URL: inbound-derived Host / forwarded headers + resolve_file_link_base_url."""
 
+import core.result_viewer as rv
 from unittest.mock import MagicMock
 
 from core.result_viewer import (
@@ -7,6 +8,14 @@ from core.result_viewer import (
     normalize_public_url_for_clients,
     resolve_file_link_base_url,
 )
+
+
+def test_infer_http_handles_missing_headers_object():
+    req = MagicMock()
+    req.headers = None
+    req.base_url = "http://192.168.0.99:9000/"
+    req.url.scheme = "http"
+    assert infer_public_base_url_from_http_request(req) == "http://192.168.0.99:9000"
 
 
 def test_infer_http_uses_x_forwarded_host():
@@ -39,3 +48,10 @@ def test_normalize_public_url_removes_whitespace_keeps_percent_encoded():
         normalize_public_url_for_clients("https://x.com /files/out?a=1")
         == "https://x.com/files/out?a=1"
     )
+
+
+def test_resolve_signed_mode_rejects_malformed_preferred_without_tunnel(monkeypatch):
+    """Do not emit bases with no real host when public URL is unset and auth (signed links) mode."""
+    monkeypatch.setattr(rv, "get_result_link_base_url", lambda: "")
+    monkeypatch.setattr(rv, "file_unsigned_dev_mode_active", lambda: False)
+    assert rv.resolve_file_link_base_url("http://") == ""

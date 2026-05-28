@@ -228,7 +228,7 @@ async def deliver_to_user(
                         except Exception:
                             pass
         if ws_count == 0:
-            logger.info(
+            logger.debug(
                 "deliver_to_user: no WebSocket session for user_id={} (reminder/push may not reach app; ensure Companion opens /ws and sends register with this user_id)",
                 user_id,
             )

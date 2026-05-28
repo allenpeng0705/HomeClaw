@@ -1375,6 +1375,19 @@ class TAM:
                             payload = {}
                         if hasattr(self.coreInst, "execute_scheduled_action"):
                             try:
+                                # ── Task tracking (Phase 4) ──────────
+                                _ctask = None
+                                try:
+                                    from core.task_registry import create_task, update_task, TaskStatus, TaskRuntime
+                                    _ctask = create_task(
+                                        runtime=TaskRuntime.CRON,
+                                        task_kind=f"cron:{action.get('action_type') or 'unknown'}",
+                                        owner_user_id=action.get("user_id") or "",
+                                    )
+                                    update_task(_ctask.task_id, TaskStatus.RUNNING)
+                                except Exception:
+                                    _ctask = None
+
                                 result = await self.coreInst.execute_scheduled_action(
                                     action_type=action.get("action_type") or "run_skill",
                                     action_payload=payload,
@@ -1383,9 +1396,24 @@ class TAM:
                                     channel_key=action.get("channel_key") or channel_key,
                                 )
                                 to_deliver = result if isinstance(result, str) and result.strip() else "Done. （已完成。）"
+                                # ── Task completion (Phase 4) ──────
+                                if _ctask is not None:
+                                    try:
+                                        from core.task_registry import update_task, TaskStatus
+                                        update_task(_ctask.task_id, TaskStatus.SUCCEEDED,
+                                                    result_summary=str(to_deliver)[:200])
+                                    except Exception:
+                                        pass
                             except Exception as exec_e:
                                 logger.exception("TAM: execute_scheduled_action raised: {}", exec_e)
                                 to_deliver = f"Error: scheduled action failed. （定时任务执行失败。）"
+                                if _ctask is not None:
+                                    try:
+                                        from core.task_registry import update_task, TaskStatus
+                                        update_task(_ctask.task_id, TaskStatus.FAILED,
+                                                    result_summary=str(exec_e)[:200])
+                                    except Exception:
+                                        pass
                             try:
                                 tam_storage.mark_scheduled_action_executed(action_id)
                                 tam_storage.delete_scheduled_action(action_id)

@@ -85,8 +85,8 @@ class CoreService {
   static const String _keyCompanionSavedPassword = 'companion_saved_password';
   static const String _keyCompanionDeviceId = 'companion_device_id';
   static const String _keyPortalAdminToken = 'portal_admin_token';
+  static const String _keyUseEnvoyCoreHttp = 'companion_route_core_http_via_envoy';
   static const String _keyPendingInboundPrefix = 'pending_inbound_';
-  static const String _keyUseEnvoyCoreHttp = 'core_http_via_envoy';
   static const String _defaultBaseUrl = 'http://127.0.0.1:9000';
 
   String _baseUrl = _defaultBaseUrl;
@@ -107,9 +107,10 @@ class CoreService {
   bool _vmprintNativePreview = false;
   String? _clawcodeWebUiUrl;
   String? _portalAdminToken;
+  /// When true (default), LAN/private Core URLs use `homeclawCoreProxy` over the Envoy relay when connected.
+  bool _useEnvoyCoreHttp = true;
 
   EnvoyNodeService? _envoyForCoreHttp;
-  bool _useEnvoyCoreHttp = false;
 
   String get baseUrl => _baseUrl;
   String? get portalAdminToken => _portalAdminToken;
@@ -130,16 +131,130 @@ class CoreService {
   String? get canvasUrl => _canvasUrl;
   String? get nodesUrl => _nodesUrl;
 
-  /// When true (and EnvoyMesh relay is connected), simple Core HTTP is routed via the paired home node's `homeclawCoreProxy`.
+  /// User toggle: route normal Core HTTP via EnvoyMesh when relay is connected (LAN/private URLs).
   bool get useEnvoyCoreHttp => _useEnvoyCoreHttp;
 
-  /// True when Companion is configured for relay routing and the Envoy WebSocket is connected.
+  /// True when the Envoy relay WebSocket is connected **and** the Companion Core URL heuristic is LAN/local-only (public internet hostnames skip Envoy routing).
+  ///
+  /// For LAN/private Core URLs, Companion tries the Envoy tunnel first when the relay is up, otherwise uses the configured Core URL directly or as fallback after tunnel errors.
   bool get coreHttpTunnelActive =>
-      _useEnvoyCoreHttp && (_envoyForCoreHttp?.isRelayConnected ?? false);
+      _useEnvoyCoreHttp &&
+      !_companionCoreUrlGloballyReachable &&
+      (_envoyForCoreHttp?.isRelayConnected ?? false);
+
+  /// When true, Companion may use Envoy routing for Core when relay is connected (LAN/private heuristic on [baseUrl]).
+  bool get companionUsesEnvoyForConfiguredCoreWhenRelayConnected =>
+      _useEnvoyCoreHttp && !_companionCoreUrlGloballyReachable;
+
+  /// Test-only override for heuristic "Core URL globally reachable?" (null = use heuristic).
+  @visibleForTesting
+  static bool? testCompanionCoreUrlGloballyReachable;
 
   /// Test-only: handshake wait for Core `/ws` (direct or Envoy tunnel). Reset to null after tests.
   @visibleForTesting
   static Duration? testOverrideCoreWsHandshakeTimeout;
+
+  /// Whether [rawBaseUrl] looks like a host the phone can reach without Envoy (public DNS / routable IP).
+  /// Used by Companion UI and tests.
+  static bool heuristicCompanionCoreUrlGloballyReachable(String rawBaseUrl) {
+    final trimmed = rawBaseUrl.trim().replaceFirst(RegExp(r'/$'), '');
+    if (trimmed.isEmpty) return false;
+
+    final u = Uri.tryParse(trimmed);
+    if (u == null || !u.hasScheme) return false;
+    if (u.scheme != 'http' && u.scheme != 'https') return false;
+
+    final host = u.host.toLowerCase();
+    if (host.isEmpty) return false;
+    if (host == 'localhost') return false;
+    if (host.endsWith('.local')) return false;
+    // Single-label names are often LAN/mDNS-only.
+    if (!host.contains('.')) return false;
+
+    final parsed = InternetAddress.tryParse(host);
+    if (parsed != null) {
+      if (parsed.isMulticast || parsed.isLoopback || parsed.isLinkLocal) {
+        return false;
+      }
+      if (parsed.type == InternetAddressType.IPv6) {
+        final raw = parsed.rawAddress;
+        if (raw.isEmpty) return false;
+        final b0 = raw[0];
+        if (b0 == 0xfc || b0 == 0xfd) return false; // ULA fc00::/7
+        return true;
+      }
+      return _ipv4LooksGloballyRoutable(parsed);
+    }
+
+    return true;
+  }
+
+  static bool _ipv4LooksGloballyRoutable(InternetAddress ip) {
+    if (ip.type != InternetAddressType.IPv4) return false;
+    final a = ip.rawAddress;
+    if (a.length != 4) return false;
+    final x = a[0], y = a[1];
+
+    // Loopback/private/link-local/zero/CGNAT
+    if (x == 127) return false;
+    if (x == 10) return false;
+    if (x == 172 && y >= 16 && y <= 31) return false;
+    if (x == 192 && y == 168) return false;
+    if (x == 169 && y == 254) return false;
+    if (x == 100 && y >= 64 && y <= 127) return false; // Carrier-grade NAT
+    if (x == 0) return false;
+    return true;
+  }
+
+  bool get _companionCoreUrlGloballyReachable {
+    switch (CoreService.testCompanionCoreUrlGloballyReachable) {
+      case true:
+        return true;
+      case false:
+        return false;
+      case null:
+        return heuristicCompanionCoreUrlGloballyReachable(
+          _baseUrl.trim().replaceFirst(RegExp(r'/$'), ''),
+        );
+    }
+  }
+
+  /// True when [rawBaseUrl] host is loopback—the Companion device cannot reach Core at that URL directly over HTTP.
+  /// Used by Companion UI and tests.
+  static bool heuristicCompanionCoreBaseHostIsLoopback(String rawBaseUrl) {
+    final trimmed = rawBaseUrl.trim().replaceFirst(RegExp(r'/$'), '');
+    if (trimmed.isEmpty) return true;
+    final u = Uri.tryParse(trimmed);
+    if (u == null || u.host.isEmpty) return true;
+    final h = u.host.toLowerCase();
+    if (h == 'localhost' ||
+        h == '127.0.0.1' ||
+        h == '::1' ||
+        h == '0:0:0:0:0:0:0:1') {
+      return true;
+    }
+    try {
+      final parsed = InternetAddress.tryParse(h);
+      if (parsed != null && parsed.isLoopback) return true;
+    } catch (_) {}
+    return false;
+  }
+
+  bool _companionCoreBaseHostIsLoopback() =>
+      CoreService.heuristicCompanionCoreBaseHostIsLoopback(_baseUrl);
+
+  Future<void> _tryEnvoyReconnectForCoreHttp() async {
+    final envoy = _envoyForCoreHttp;
+    if (envoy == null) return;
+    final hasPairing = await envoy.getPairedNodeInfo() != null;
+    final ws = await envoy.getSavedHomeNodeUrl();
+    final hasDialHint = ws != null && ws.isNotEmpty;
+    if (!hasPairing && !hasDialHint) return;
+    await envoy.reconnectUsingSavedPairing(
+      timeout: const Duration(seconds: 40),
+      minAttemptGap: const Duration(seconds: 3),
+    );
+  }
 
   static Duration _coreWsHandshakeTimeoutResolved() =>
       testOverrideCoreWsHandshakeTimeout ?? const Duration(seconds: 10);
@@ -239,12 +354,6 @@ class CoreService {
 
   void bindEnvoyForCoreHttp(EnvoyNodeService? envoy) {
     _envoyForCoreHttp = envoy;
-  }
-
-  Future<void> saveUseEnvoyCoreHttp(bool value) async {
-    _useEnvoyCoreHttp = value;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyUseEnvoyCoreHttp, value);
   }
 
   NodeService? _nodeService;
@@ -407,7 +516,7 @@ class CoreService {
     if (_sessionUserId != null && _sessionUserId!.isEmpty) _sessionUserId = null;
     _portalAdminToken = prefs.getString(_keyPortalAdminToken)?.trim();
     if (_portalAdminToken != null && _portalAdminToken!.isEmpty) _portalAdminToken = null;
-    _useEnvoyCoreHttp = prefs.getBool(_keyUseEnvoyCoreHttp) ?? false;
+    _useEnvoyCoreHttp = prefs.getBool(_keyUseEnvoyCoreHttp) ?? true;
   }
 
   /// POST /api/portal/auth with Portal admin username/password. Returns token. Throws on 401/503/network.
@@ -1302,6 +1411,12 @@ class CoreService {
     await prefs.setBool(_keyBridgeAgentStreamPreview, value);
   }
 
+  Future<void> saveUseEnvoyCoreHttp(bool value) async {
+    _useEnvoyCoreHttp = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyUseEnvoyCoreHttp, value);
+  }
+
   Future<void> saveSettings({required String baseUrl, String? apiKey}) async {
     final trimmed = baseUrl.trim().replaceFirst(RegExp(r'/$'), '');
     _baseUrl = trimmed.isEmpty ? _defaultBaseUrl : trimmed;
@@ -1611,8 +1726,9 @@ class CoreService {
     required Duration requested,
     required Duration cap,
   }) async {
-    if (!_useEnvoyCoreHttp || _envoyForCoreHttp == null) return false;
-    if (requested > cap) return false;
+    if (!_useEnvoyCoreHttp) return false;
+    if (_companionCoreUrlGloballyReachable) return false;
+    if (_envoyForCoreHttp == null || requested > cap) return false;
     return _envoyForCoreHttp!.isRelayConnected;
   }
 
@@ -1649,13 +1765,17 @@ class CoreService {
         if (RelayClient.looksLikeRpcMethodNotFound(e)) {
           rethrow;
         }
+        rethrow;
       }
     }
     final r2 = await build();
     return http.Response.fromStream(await r2.send().timeout(timeout));
   }
 
-  /// GET/POST/… to Core directly or through the Envoy home node proxy when enabled.
+  /// GET/POST/… through the Envoy relay when [baseUrl] is LAN/private heuristic and relay is connected.
+  ///
+  /// If the tunnel fails, requests are **not** retried bare to [_baseUrl] from the phone (avoids pointless
+  /// dials when off Wi‑Fi). Disconnect Envoy or fix relay to recover; publicly reachable hosts still use direct HTTP.
   Future<http.Response> _coreHttpViaEnvoyOrDirect({
     required String method,
     required Uri uri,
@@ -1666,40 +1786,108 @@ class CoreService {
   }) async {
     final t = timeout ?? const Duration(seconds: 30);
     final cap = _companionTunnelCap(tunnelCapKind);
-    if (await _envoyCoreHttpEligible(requested: t, cap: cap)) {
-      try {
-        return await _envoyForCoreHttp!.homeclawCoreHttpViaRelay(
+
+    Future<http.Response> viaTunnelNow() =>
+        _envoyForCoreHttp!.homeclawCoreHttpViaRelay(
           method: method,
           fullUri: uri,
           headers: headers,
           body: body,
           timeout: t,
         );
+
+    Future<http.Response> directHttpSwitch() async {
+      switch (method.toUpperCase()) {
+        case 'GET':
+          return http.get(uri, headers: headers).timeout(t);
+        case 'POST':
+          return http.post(uri, headers: headers, body: body).timeout(t);
+        case 'PUT':
+          return http.put(uri, headers: headers, body: body).timeout(t);
+        case 'PATCH':
+          return http.patch(uri, headers: headers, body: body).timeout(t);
+        case 'DELETE':
+          return http.delete(uri, headers: headers).timeout(t);
+        case 'HEAD':
+          return http.head(uri, headers: headers).timeout(t);
+        default:
+          throw ArgumentError('Unsupported HTTP method: $method');
+      }
+    }
+
+    Future<void> recoverRelayIfEligible() async {
+      if (_companionCoreUrlGloballyReachable) return;
+      if (_envoyForCoreHttp == null || t > cap) return;
+      if (_envoyForCoreHttp!.isRelayConnected) return;
+      await _tryEnvoyReconnectForCoreHttp();
+    }
+
+    if (await _envoyCoreHttpEligible(requested: t, cap: cap)) {
+      try {
+        return await viaTunnelNow();
       } catch (e) {
         if (RelayClient.looksLikeRpcMethodNotFound(e)) {
           throw StateError(
             'Envoy relay: homeclawCoreProxy method not supported on this node. Update EnvoyMesh on the paired home machine.',
           );
         }
-        /* direct fallback */
+        // Do not dial the LAN/private Core URL from the phone once we chose Envoy —
+        // that looks like ignoring the relay when off Wi‑Fi and usually fails/timeouts anyway.
+        throw Exception(
+          'Core request via EnvoyMesh failed ($method ${uri.path}). '
+          'Not retrying directly to $_baseUrl from this device. '
+          'Check Envoy relay connection, Core base URL (as seen at home), and API key on the login screen. Original: $e',
+        );
       }
     }
-    switch (method.toUpperCase()) {
-      case 'GET':
-        return http.get(uri, headers: headers).timeout(t);
-      case 'POST':
-        return http.post(uri, headers: headers, body: body).timeout(t);
-      case 'PUT':
-        return http.put(uri, headers: headers, body: body).timeout(t);
-      case 'PATCH':
-        return http.patch(uri, headers: headers, body: body).timeout(t);
-      case 'DELETE':
-        return http.delete(uri, headers: headers).timeout(t);
-      case 'HEAD':
-        return http.head(uri, headers: headers).timeout(t);
-      default:
-        throw ArgumentError('Unsupported HTTP method: $method');
+
+    // Relay down: rebuild WebSocket dial from persisted QR/pairing (tokens + relay URL) once, then tunnel.
+    await recoverRelayIfEligible();
+    if (await _envoyCoreHttpEligible(requested: t, cap: cap)) {
+      try {
+        return await viaTunnelNow();
+      } catch (e) {
+        if (RelayClient.looksLikeRpcMethodNotFound(e)) {
+          throw StateError(
+            'Envoy relay: homeclawCoreProxy method not supported on this node. Update EnvoyMesh on the paired home machine.',
+          );
+        }
+        throw Exception(
+          'Core request via EnvoyMesh failed ($method ${uri.path}). '
+          'Not retrying directly to $_baseUrl from this device. '
+          'Check Envoy relay connection, Core base URL (as seen at home), and API key on the login screen. Original: $e',
+        );
+      }
     }
+
+    // Companion cannot dial Core on localhost/127.0.0.1 — only EnvoyMesh tunnel or a reachable host works.
+    if (!_companionCoreUrlGloballyReachable && _companionCoreBaseHostIsLoopback()) {
+      await _tryEnvoyReconnectForCoreHttp();
+      if (await _envoyCoreHttpEligible(requested: t, cap: cap)) {
+        try {
+          return await viaTunnelNow();
+        } catch (e) {
+          if (RelayClient.looksLikeRpcMethodNotFound(e)) {
+            throw StateError(
+              'Envoy relay: homeclawCoreProxy method not supported on this node. Update EnvoyMesh on the paired home machine.',
+            );
+          }
+          throw Exception(
+            'Cannot reach Core at $_baseUrl from this phone (localhost). EnvoyMesh reconnect failed '
+            'or relay is unreachable. Try Settings → EnvoyMesh → Connect (pairing persists); '
+            'scan pairing QR again only if that still fails.',
+          );
+        }
+      }
+      throw Exception(
+        'Cannot reach Core at $_baseUrl from this phone — that URL points at the device itself. '
+        'Open Settings → EnvoyMesh → Connect—the app reuses saved pairing (no QR every time). '
+        'Scan pairing QR again only if Connect repeatedly fails or you switched home nodes. '
+        'Or set Core URL to a host this phone can reach (HTTPS hostname or LAN IP on Wi‑Fi).',
+      );
+    }
+
+    return directHttpSwitch();
   }
 
   /// Auth headers for requests. Use [forCompanionApi: true] only for /api/me and /api/me/friends (they require Bearer session token).
@@ -3672,6 +3860,55 @@ class CoreService {
       throw Exception(body['detail']?.toString() ?? 'Sync failed: ${response.statusCode}');
     }
     return body;
+  }
+
+  // ── Phase 4: Task API ──────────────────────────────────────────
+
+  /// GET /api/tasks — list subagent/cron tasks. When no filters, returns summary.
+  Future<Map<String, dynamic>> fetchTasks({String? status, String? runtime, int limit = 50}) async {
+    final params = <String, String>{};
+    if (status != null && status.isNotEmpty) params['status'] = status;
+    if (runtime != null && runtime.isNotEmpty) params['runtime'] = runtime;
+    params['limit'] = limit.toString();
+    final url = Uri.parse('$_baseUrl/api/tasks').replace(queryParameters: params);
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET', uri: url, headers: _authHeaders(),
+      timeout: const Duration(seconds: 15),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Tasks: ${response.statusCode}');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  // ── Phase 1-3: Memory health ────────────────────────────────────
+
+  /// GET /memory/health — MemoryPlugin health + doctor report.
+  Future<Map<String, dynamic>> fetchMemoryHealth() async {
+    final url = Uri.parse('$_baseUrl/memory/health');
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'GET', uri: url, headers: _authHeaders(),
+      timeout: const Duration(seconds: 10),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Memory health: ${response.statusCode}');
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  // ── Phase 5: Approval resolution ─────────────────────────────────
+
+  /// POST /api/clawcode/approvals/{id}/resolve — approve or deny a pending approval.
+  Future<void> resolveApproval(String approvalId, {required bool approved}) async {
+    final url = Uri.parse('$_baseUrl/api/clawcode/approvals/$approvalId/resolve');
+    final response = await _coreHttpViaEnvoyOrDirect(
+      method: 'POST', uri: url, headers: _authHeaders(),
+      body: jsonEncode({'action': approved ? 'approve' : 'deny'}),
+      timeout: const Duration(seconds: 10),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Resolve approval: ${response.statusCode}');
+    }
   }
 
   /// POST /api/testing/clear-all — unregister external plugins and clear skills vector store. For testing.

@@ -35,7 +35,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late final SettingsNotifier _settingsNotifier;
   /// Non-null after [_loadEnvoyP2pFields] when a QR pairing payload was saved.
   String? _envoyPairedHint;
-  bool _routeCoreHttpViaEnvoy = false;
+  bool _routeCoreHttpViaEnvoy = true;
+  /// From paired node's `getConnectionStatus` when relay is connected (`lastError` / `lastErrorAt`).
+  String? _homeNodeLastError;
+  String? _homeNodeLastErrorAt;
 
   @override
   void initState() {
@@ -68,7 +71,40 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ? 'QR pairing saved · reconnect uses stored home node URL'
             : null;
       });
+      if (envoy.isRelayConnected) {
+        await _refreshHomeNodeConnectionDiagnostics();
+      }
     } catch (_) {}
+  }
+
+  Future<void> _refreshHomeNodeConnectionDiagnostics() async {
+    final envoy = ref.read(envoyNodeServiceProvider);
+    if (!envoy.isRelayConnected) {
+      if (!mounted) return;
+      setState(() {
+        _homeNodeLastError = null;
+        _homeNodeLastErrorAt = null;
+      });
+      return;
+    }
+    try {
+      final m = await envoy.getConnectionStatus();
+      if (!mounted) return;
+      final le = m['lastError'];
+      final la = m['lastErrorAt'];
+      setState(() {
+        _homeNodeLastError =
+            le is String && le.trim().isNotEmpty ? le.trim() : null;
+        _homeNodeLastErrorAt =
+            la is String && la.trim().isNotEmpty ? la.trim() : null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _homeNodeLastError = null;
+        _homeNodeLastErrorAt = null;
+      });
+    }
   }
 
   Future<void> _loadMyAvatar() async {
@@ -178,57 +214,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  Future<void> _onRouteCoreHttpViaEnvoyChanged(bool want) async {
-    if (!mounted) return;
-    if (!want) {
-      setState(() => _routeCoreHttpViaEnvoy = false);
-      await widget.coreService.saveUseEnvoyCoreHttp(false);
-      return;
-    }
-    final envoy = ref.read(envoyNodeServiceProvider);
-    if (!envoy.isRelayConnected) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content:
-                Text('Connect the Envoy relay first, then turn on Core HTTP routing.'),
-          ),
-        );
-      }
-      return;
-    }
-    final syntaxErr =
-        widget.coreService.validateCompanionCoreUrlSyntax(_urlController.text);
-    if (syntaxErr != null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(syntaxErr)));
-      }
-      return;
-    }
-    final trimmedBase = _urlController.text.trim().replaceFirst(RegExp(r'/$'), '');
-    final baseParsed = Uri.parse(trimmedBase);
-    try {
-      await widget.coreService.probeEnvoyTunnelCoreReady(baseParsed);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Tunnel check failed: $e')),
-        );
-      }
-      return;
-    }
-    setState(() => _routeCoreHttpViaEnvoy = true);
-    await widget.coreService.saveUseEnvoyCoreHttp(true);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-            'Core HTTP routing via Envoy is on while the relay is connected.'),
-      ),
-    );
-  }
-
   Future<void> _clearChatHistories(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -305,11 +290,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
               keyboardType: TextInputType.url,
               autocorrect: false,
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Must match how your Core is addressed for API paths (host/port). Envoy routes by path/query; a wrong Core URL yields confusing failures even when relay works.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
             const SizedBox(height: 16),
             const Text(
@@ -580,9 +560,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ? Colors.green
                         : envoyState.connectionStatus == RelayClientState.connecting
                             ? Colors.orange
-                            : envoyState.connectionStatus == RelayClientState.error
-                                ? Colors.red
-                                : Colors.grey.shade400,
+                            : envoyState.connectionStatus ==
+                                    RelayClientState.reconnectBackoff
+                                ? Colors.amber.shade700
+                                : envoyState.connectionStatus == RelayClientState.error
+                                    ? Colors.red
+                                    : Colors.grey.shade400,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -592,18 +575,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ? 'Connected'
                       : envoyState.connectionStatus == RelayClientState.connecting
                           ? 'Connecting…'
-                          : envoyState.connectionStatus == RelayClientState.error
-                              ? 'Error${envoyState.error != null ? ': ${envoyState.error}' : ''}'
-                              : 'Disconnected',
+                          : envoyState.connectionStatus ==
+                                  RelayClientState.reconnectBackoff
+                              ? 'Between reconnect tries'
+                              : envoyState.connectionStatus == RelayClientState.error
+                                  ? 'Error${envoyState.error != null ? ': ${envoyState.error}' : ''}'
+                                  : 'Disconnected',
                   style: TextStyle(
                     color: envoyState.isConnected
                         ? Colors.green
                         : envoyState.connectionStatus == RelayClientState.error
                             ? Colors.red
-                            : null,
+                            : envoyState.connectionStatus ==
+                                    RelayClientState.reconnectBackoff
+                                ? Colors.amber.shade800
+                                : null,
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'If the relay drops, Companion retries in the background (delay caps around 1 minute). '
+              'Tap Connect below anytime for an immediate attempt—saved pairing skips QR.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
             ),
             if (_envoyPairedHint != null) ...[
               const SizedBox(height: 8),
@@ -615,23 +610,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             SwitchListTile(
               title: const Text('Route Core HTTP via Envoy home node'),
               subtitle: const Text(
-                'When enabled, Companion runs GET /ready via the relay on turn-on; normal JSON APIs tunnel first. Saves only after checks pass.',
+                'Uses the paired WebSocket tunnel for normal API calls when Connected. Uploads/streaming/long inbound still prefer direct TCP to your Core URL where possible.',
                 style: TextStyle(fontSize: 12),
               ),
               value: _routeCoreHttpViaEnvoy,
-              onChanged: _onRouteCoreHttpViaEnvoyChanged,
-            ),
-            ExpansionTile(
-              title: const Text('When the phone still needs a reachable Core URL'),
-              childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              children: const [
-                Text(
-                  '• Off-LAN with routing on: SSE, multipart, and /ws are tunnelled through the home node when supported (SSE is buffered end-to-end — progress may arrive in one chunk).\n'
-                  '• Anything not on the Companion Core origin (different host/port/scheme) still needs the phone to reach that URL directly.\n'
-                  '• Chat inline images from this Core origin use CoreOriginNetworkImage with the relay when routing is on.',
-                  style: TextStyle(fontSize: 12, height: 1.35),
-                ),
-              ],
+              onChanged: (v) async {
+                setState(() => _routeCoreHttpViaEnvoy = v);
+                await widget.coreService.saveUseEnvoyCoreHttp(v);
+              },
             ),
             if (envoyState.initialized) ...[
               const SizedBox(height: 8),
@@ -648,6 +634,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 envoyState.ownerId ?? '',
                 style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
               ),
+              if (_homeNodeLastError != null &&
+                  _homeNodeLastError!.trim().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(
+                  'Last home node error (diagnostics)',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                ),
+                SelectableText(
+                  _homeNodeLastErrorAt ?? '—',
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                ),
+                const SizedBox(height: 4),
+                SelectableText(
+                  _homeNodeLastError!,
+                  style: TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ],
+              if (envoyState.isConnected) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () =>
+                        unawaited(_refreshHomeNodeConnectionDiagnostics()),
+                    icon: const Icon(Icons.refresh, size: 18),
+                    label: const Text('Refresh home node diagnostics'),
+                  ),
+                ),
+              ],
             ],
             const SizedBox(height: 12),
             // Home node URL
@@ -678,6 +697,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           if (envoyState.isConnected) {
                             await envoy.disconnect();
                             ref.read(envoyMeshProvider.notifier).setDisconnected();
+                            if (mounted) {
+                              setState(() {
+                                _homeNodeLastError = null;
+                                _homeNodeLastErrorAt = null;
+                              });
+                            }
                           } else {
                             final url = _envoyUrlController.text.trim();
                             if (url.isEmpty) {
@@ -711,6 +736,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                   const SnackBar(content: Text('Connected via EnvoyMesh P2P')),
                                 );
                               }
+                              unawaited(_refreshHomeNodeConnectionDiagnostics());
                             } catch (e) {
                               ref.read(envoyMeshProvider.notifier).setError(e.toString());
                               if (mounted) {
@@ -785,6 +811,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ],
               ),
               const SizedBox(height: 32),
+              // ── Memory health card (Phase 1-3) ──────────────────
+              _MemoryHealthCard(coreService: widget.coreService),
+              const SizedBox(height: 16),
             ],
             SafeArea(
               top: false,
@@ -796,6 +825,78 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
                 child: const Text('Save'),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Memory health card (Phase 1-3) ──────────────────────────────────
+
+class _MemoryHealthCard extends StatefulWidget {
+  final CoreService coreService;
+  const _MemoryHealthCard({required this.coreService});
+
+  @override
+  State<_MemoryHealthCard> createState() => _MemoryHealthCardState();
+}
+
+class _MemoryHealthCardState extends State<_MemoryHealthCard> {
+  Map<String, dynamic>? _data;
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetch();
+  }
+
+  Future<void> _fetch() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      _data = await widget.coreService.fetchMemoryHealth();
+    } catch (e) {
+      _error = e.toString();
+    }
+    setState(() { _loading = false; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Text('Memory Health', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const Spacer(),
+                if (_data != null)
+                  Icon(
+                    _data!['ok'] == true ? Icons.check_circle : Icons.error,
+                    color: _data!['ok'] == true ? Colors.green : Colors.red,
+                    size: 20,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (_loading) const LinearProgressIndicator(),
+            if (_error != null) Text('Error: $_error', style: const TextStyle(color: Colors.red)),
+            if (_data != null) ...[
+              Text('Backend: ${_data!['backend'] ?? 'unknown'}'),
+              Text('Index size: ${_data!['index_size'] ?? '—'}'),
+              Text('Errors: ${_data!['error_count'] ?? 0}'),
+            ],
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _loading ? null : _fetch,
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Refresh'),
             ),
           ],
         ),

@@ -54,9 +54,17 @@ void main() async {
   final envoyService = EnvoyNodeService();
   try {
     await envoyService.initialize();
+    final savedPairing = await envoyService.getPairedNodeInfo();
     final savedUrl = await envoyService.getSavedHomeNodeUrl();
-    if (savedUrl != null && savedUrl.isNotEmpty) {
-      unawaited(envoyService.connect(savedUrl));
+    if (savedPairing != null ||
+        (savedUrl != null && savedUrl.isNotEmpty)) {
+      unawaited(
+        envoyService.reconnectUsingSavedPairing(
+          timeout: const Duration(seconds: 60),
+          minAttemptGap: Duration.zero,
+          silentFailures: true,
+        ),
+      );
     }
   } catch (_) {
     // EnvoyMesh P2P init failed; app continues without P2P.

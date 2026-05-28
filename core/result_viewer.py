@@ -43,7 +43,70 @@ def normalize_public_url_for_clients(url: str) -> str:
 
 def _normalize_link_base_url(raw: Optional[str]) -> str:
     """Strip accidental whitespace in public base URLs (core_public_url, X-Forwarded-Host). Never raises."""
-    return normalize_public_url_for_clients((raw or "").strip()).rstrip("/")
+    s = normalize_public_url_for_clients((raw or "").strip()).rstrip("/")
+    if not s:
+        return ""
+    # rstrip('/') turns bare ``scheme://`` (no hostname) into ``http:`` / ``https:``, which urlparse mishandles elsewhere.
+    sl = s.lower()
+    if sl in ("http:", "https:", "http:/", "https:/"):
+        return ""
+    return s
+
+
+def _link_base_host_loopback_or_missing(base_url: str) -> bool:
+    """True if host is missing, localhost, or IPv4/IPv6 loopback.
+
+    When Core sits behind EnvoyMesh (or another reverse proxy), inbound HTTP often shows Host as
+    ``127.0.0.1``. Using that for Companion file/bridge links produces URLs that only work on the Core
+    host—not on the phone. Skip such preferred bases and fall through to ``core_public_url`` / Pinggy.
+    Never raises.
+    """
+    try:
+        raw = (base_url or "").strip()
+        if not raw:
+            return True
+        trimmed = raw if "://" in raw else f"http://{raw}"
+        p = urlparse(trimmed)
+        h = (p.hostname or "").strip().lower()
+        if not h:
+            return True
+        if h == "localhost":
+            return True
+        if h.startswith("127."):
+            return True
+        if h in ("::1", "0:0:0:0:0:0:0:1"):
+            return True
+        return False
+    except Exception:
+        return True
+
+
+def _link_base_host_explicit_loopback_only(base_url: str) -> bool:
+    """True only for http(s) with a real hostname that is localhost or IPv4/v6 loopback — not malformed bases.
+
+    Used as last-resort preferred base when ``core_public_url`` / runtime tunnel is unset (same-machine).
+    Strings with missing/invalid hosts are excluded so we do not emit broken URLs.
+    Never raises.
+    """
+    try:
+        raw = (base_url or "").strip()
+        if not raw or "://" not in raw:
+            return False
+        p = urlparse(normalize_public_url_for_clients(raw))
+        if (p.scheme or "").lower() not in ("http", "https"):
+            return False
+        h = (p.hostname or "").strip().lower()
+        if not h:
+            return False
+        if h == "localhost":
+            return True
+        if h.startswith("127."):
+            return True
+        if h in ("::1", "0:0:0:0:0:0:0:1"):
+            return True
+        return False
+    except Exception:
+        return False
 
 
 # Default expiry for file view links (7 days). Override via config: file_view_link_expiry_sec (seconds or e.g. "7d").
@@ -369,6 +432,8 @@ def infer_public_base_url_from_http_request(request: Any) -> Optional[str]:
     try:
         if request is None:
             return None
+        fwd_host = ""
+        fwd_proto = ""
         hdr = getattr(request, "headers", None)
         if hdr is not None:
             fwd_host = (hdr.get("x-forwarded-host") or hdr.get("X-Forwarded-Host") or "").strip()
@@ -437,16 +502,25 @@ def preferred_file_link_base_from_context(context: Any) -> Optional[str]:
 def resolve_file_link_base_url(preferred_base_url: Optional[str] = None) -> str:
     """
     Effective base URL for /files/out links.
-    Order: (1) preferred (from inbound HTTP/WS), (2) core_public_url or Pinggy runtime, (3) if unsigned dev (no auth_api_key), localhost Core URL from config.
-    Returns "" if nothing can be determined (signed tokens need auth_api_key + a reachable base).
+    Order:
+    (1) Preferred (when not loopback/missing-host): LAN, ``X-Forwarded-Host``, real tunnel hostname, etc.
+    (2) ``core_public_url`` or Pinggy runtime when (1) was skipped (proxy often reports ``127.0.0.1`` —
+        unusable from another device).
+    (3) When (2) is unset only: reuse preferred URL if it is explicitly loopback localhost
+        (valid ``http``/``https`` with localhost, ``127.*``, or ``::1`` — same-machine / emulator).
+        Malformed bases (no hostname) are rejected.
+    (4) Unsigned dev: ``get_core_public_url()`` binding when still needed.
+    Returns "" only when nothing usable exists (typically signed tokens with no reachable base).
     Never raises.
     """
     u = _normalize_link_base_url(preferred_base_url)
-    if u:
+    if u and not _link_base_host_loopback_or_missing(u):
         return u
     u2 = _normalize_link_base_url(get_result_link_base_url())
     if u2:
         return u2
+    if u and _link_base_host_explicit_loopback_only(u):
+        return u
     if file_unsigned_dev_mode_active():
         return _normalize_link_base_url(get_core_public_url() or "")
     return ""

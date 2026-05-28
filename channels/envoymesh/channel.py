@@ -12,9 +12,13 @@ reply back to the bridge's /bridge/send endpoint for signed P2P delivery.
 
 One EnvoyMesh Node = one bridge = one instance of this channel.
 """
+import hashlib
 import os
 import sys
+from collections import OrderedDict
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
@@ -31,7 +35,40 @@ load_dotenv(env_path)
 from base.util import Util
 from channels.clawcode_binding import apply_clawcode_inbound_flow
 
-app = FastAPI(title="HomeClaw EnvoyMesh Channel")
+# Shared pooled client for outbound Core + bridge — fewer TCP/TLS handshakes on sustained P2P traffic.
+_http_client: Optional[httpx.AsyncClient] = None
+
+# Dedup cache: recent message hashes → (text, timestamp). Prevents duplicate processing
+# when the bridge retries. LRU-ordered; max 200 entries before eviction.
+_dedup_cache: OrderedDict[str, tuple[str, float]] = OrderedDict()
+_DEDUP_MAX = 200
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    global _http_client
+    _http_client = httpx.AsyncClient(
+        trust_env=False,
+        limits=httpx.Limits(max_connections=48, max_keepalive_connections=16),
+        timeout=httpx.Timeout(310.0, connect=25.0),
+    )
+    try:
+        yield
+    finally:
+        cli = _http_client
+        if cli is not None:
+            await cli.aclose()
+        _http_client = None
+
+
+app = FastAPI(title="HomeClaw EnvoyMesh Channel", lifespan=_lifespan)
+
+
+def _shared_http() -> httpx.AsyncClient:
+    http = _http_client
+    if http is None:
+        raise RuntimeError("EnvoyMesh channel HTTP pool not initialized (lifespan not run)")
+    return http
 
 
 # ── config ──────────────────────────────────────────────────────────────────
@@ -90,10 +127,30 @@ async def message(req: Request):
     text = (body.get("text") or "").strip()
 
     if not sender_owner_id or not text:
+        # Deliver error to P2P sender if we can
+        if sender_owner_id and sender_peer_id:
+            try:
+                await _reply_to_bridge(sender_peer_id, "Error: message must include fromOwnerId and text.")
+            except Exception:
+                pass
         return JSONResponse(
             status_code=400,
             content={"error": "fromOwnerId and text are required"},
         )
+
+    # ── dedup check: skip duplicate messages within the cache window ────
+    _msg_hash = hashlib.sha256(f"{sender_owner_id}:{text}".encode()).hexdigest()
+    if _msg_hash in _dedup_cache:
+        _cached_text, _cached_ts = _dedup_cache[_msg_hash]
+        # Move to end (LRU: most recent)
+        _dedup_cache.move_to_end(_msg_hash)
+        logger.debug("[envoymesh] duplicate message from {} skipped: {}", sender_owner_id, text[:60])
+        return {"text": _cached_text, "status": "ok", "warning": "deduplicated"}
+    # Evict oldest if at capacity
+    while len(_dedup_cache) >= _DEDUP_MAX:
+        _dedup_cache.popitem(last=False)
+    import time
+    _dedup_cache[_msg_hash] = ("", time.time())  # placeholder, filled after reply
 
     # ── 1. Build inbound payload for Core ───────────────────────────────
     # user_id = configured HomeClaw user (matches user.yml id)
@@ -112,17 +169,17 @@ async def message(req: Request):
     # ── 2. Check for Claw-Code commands ─────────────────────────────────
     _cc = apply_clawcode_inbound_flow(HC_USER_ID, text, payload)
     if _cc is not None:
-        await _reply_to_bridge(sender_peer_id, _cc)
+        _sent = await _reply_to_bridge(sender_peer_id, _cc)
+        if not _sent:
+            logger.warning("[envoymesh] ClawCode reply failed to reach bridge, but CLI result returned inline")
+        _dedup_cache[_msg_hash] = (_cc, time.time())
         return {"text": _cc, "status": "clawcode"}
 
     # ── 3. Forward to Core ──────────────────────────────────────────────
     core_inbound_url = f"{core_url()}/inbound"
     headers = Util().get_channels_core_api_headers()
     try:
-        async with httpx.AsyncClient(trust_env=False) as client:
-            r = await client.post(
-                core_inbound_url, json=payload, headers=headers, timeout=120.0
-            )
+        r = await _shared_http().post(core_inbound_url, json=payload, headers=headers, timeout=300.0)
         if r.status_code != 200:
             logger.warning(f"Core returned {r.status_code}: {r.text}")
             return JSONResponse(
@@ -146,31 +203,40 @@ async def message(req: Request):
     # ── 4. Send Core's reply back to the bridge ─────────────────────────
     reply_text = (core_response.get("text") or "").strip()
     if reply_text:
-        await _reply_to_bridge(sender_peer_id, reply_text)
+        _sent = await _reply_to_bridge(sender_peer_id, reply_text)
+        if not _sent:
+            logger.warning("[envoymesh] Core reply to bridge failed for {}", sender_peer_id)
 
+    _dedup_cache[_msg_hash] = (reply_text, time.time())
     return {"text": reply_text, "status": "ok"}
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
-async def _reply_to_bridge(to: str, text: str):
-    """POST the Core reply back to EnvoyMesh bridge /bridge/send."""
+async def _reply_to_bridge(to: str, text: str) -> bool:
+    """POST the Core reply back to EnvoyMesh bridge /bridge/send.
+
+    Returns True if the bridge acknowledged the message, False otherwise.
+    """
     try:
-        async with httpx.AsyncClient(trust_env=False) as client:
-            r = await client.post(
-                BRIDGE_URL,
-                json={"to": to, "text": text},
-                headers=_bridge_headers(),
-                timeout=30.0,
-            )
+        r = await _shared_http().post(
+            BRIDGE_URL,
+            json={"to": to, "text": text},
+            headers=_bridge_headers(),
+            timeout=30.0,
+        )
         if r.status_code == 200:
             logger.info(f"[envoymesh] reply sent to {to}: {text[:80]}...")
+            return True
         else:
             logger.warning(f"[envoymesh] bridge returned {r.status_code}: {r.text}")
+            return False
     except httpx.ConnectError:
         logger.error(f"[envoymesh] bridge unreachable at {BRIDGE_URL}")
+        return False
     except Exception as e:
         logger.exception(f"[envoymesh] bridge reply failed: {e}")
+        return False
 
 
 # ── entry ───────────────────────────────────────────────────────────────────

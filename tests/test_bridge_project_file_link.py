@@ -48,6 +48,43 @@ def test_build_bridge_project_browser_url_signed(monkeypatch):
     assert url.startswith("https://core.example/files/bridge-project?token=")
 
 
+def test_build_bridge_project_browser_url_signed_claude_backend(monkeypatch):
+    monkeypatch.setattr(rv, "_get_file_token_secret", lambda: b"secret")
+    monkeypatch.setattr(rv, "resolve_file_link_base_url", lambda _pref=None: "https://core.example")
+    url, err = rv.build_bridge_project_browser_url("claude", "lib/x.dart")
+    assert err is None
+    assert url
+    assert url.startswith("https://core.example/files/bridge-project?token=")
+
+
+def test_resolve_ipv6_loopback_kept_when_no_public_config(monkeypatch):
+    monkeypatch.setattr(rv, "get_result_link_base_url", lambda: "")
+    assert rv.resolve_file_link_base_url("http://[::1]:9000/foo") == "http://[::1]:9000/foo"
+
+
+def test_resolve_file_link_base_url_keeps_loopback_when_no_public_config(monkeypatch):
+    """Without core_public_url / runtime tunnel, loopback inferred Host still works like before."""
+    monkeypatch.setattr(rv, "get_result_link_base_url", lambda: "")
+    assert rv.resolve_file_link_base_url("http://127.0.0.1:9000") == "http://127.0.0.1:9000"
+    assert rv.resolve_file_link_base_url("http://localhost:9000/") == "http://localhost:9000"
+
+
 def test_validate_bridge_project_rel_path_rejects_traversal():
     assert rv.validate_bridge_project_rel_path("cursor", "../etc/passwd") is False
     assert rv.validate_bridge_project_rel_path("cursor", "ok/sub.txt") is True
+
+
+def test_resolve_file_link_base_url_skips_loopback_preferred(monkeypatch):
+    """Behind EnvoyMesh, infer_public_base_from_request is often http://127.0.0.1 — skip for Companion links."""
+    monkeypatch.setattr(rv, "get_result_link_base_url", lambda: "https://tunnel.example/")
+    assert rv.resolve_file_link_base_url("http://127.0.0.1:9000") == "https://tunnel.example"
+
+
+def test_resolve_file_link_base_url_skips_localhost_preferred(monkeypatch):
+    monkeypatch.setattr(rv, "get_result_link_base_url", lambda: "https://tunnel.example")
+    assert rv.resolve_file_link_base_url("http://localhost:9000") == "https://tunnel.example"
+
+
+def test_resolve_file_link_base_url_keeps_lan_preferred(monkeypatch):
+    monkeypatch.setattr(rv, "get_result_link_base_url", lambda: "https://fallback.example")
+    assert rv.resolve_file_link_base_url("http://192.168.0.5:9000") == "http://192.168.0.5:9000"

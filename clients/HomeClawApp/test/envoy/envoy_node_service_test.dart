@@ -490,6 +490,10 @@ void main() {
         isFalse,
       );
       expect(
+        const EnvoyMeshState(connectionStatus: RelayClientState.reconnectBackoff).isConnected,
+        isFalse,
+      );
+      expect(
         const EnvoyMeshState(connectionStatus: RelayClientState.error).isConnected,
         isFalse,
       );
@@ -498,9 +502,10 @@ void main() {
     test('bridgeAgentContact returns agent contact', () {
       final bridgeAgent = EnvoyMeshContact(
         peerId: 'envoy_agent_abc',
-        ownerId: 'envoy:owner:abc',
+        ownerId: null,
         displayName: 'My Agent',
         role: 'agent',
+        kind: EnvoyMeshContactKind.bridgeAgent,
       );
 
       final state = EnvoyMeshState(contacts: [
@@ -510,6 +515,7 @@ void main() {
           ownerId: 'envoy:owner:peer1',
           displayName: 'Alice',
           role: 'human',
+          kind: EnvoyMeshContactKind.bondedHuman,
         ),
       ]);
 
@@ -524,6 +530,7 @@ void main() {
           ownerId: 'envoy:owner:peer1',
           displayName: 'Alice',
           role: 'human',
+          kind: EnvoyMeshContactKind.bondedHuman,
         ),
       ]);
 
@@ -534,21 +541,24 @@ void main() {
       final state = EnvoyMeshState(contacts: [
         EnvoyMeshContact(
           peerId: 'envoy_agent_abc',
-          ownerId: 'envoy:owner:abc',
+          ownerId: null,
           displayName: 'My Agent',
           role: 'agent',
+          kind: EnvoyMeshContactKind.bridgeAgent,
         ),
         EnvoyMeshContact(
           peerId: 'envoy_peer1',
           ownerId: 'envoy:owner:peer1',
           displayName: 'Alice',
           role: 'human',
+          kind: EnvoyMeshContactKind.bondedHuman,
         ),
         EnvoyMeshContact(
           peerId: 'envoy_peer2',
           ownerId: 'envoy:owner:peer2',
           displayName: 'Bob',
           role: 'human',
+          kind: EnvoyMeshContactKind.bondedHuman,
         ),
       ]);
 
@@ -567,6 +577,7 @@ void main() {
       const contact = EnvoyMeshContact(
         peerId: 'envoy_abc',
         ownerId: 'envoy:owner:abc',
+        kind: EnvoyMeshContactKind.bondedHuman,
       );
       expect(contact.role, 'human');
     });
@@ -574,9 +585,10 @@ void main() {
     test('agent role is stored', () {
       const contact = EnvoyMeshContact(
         peerId: 'envoy_agent_abc',
-        ownerId: 'envoy:owner:abc',
+        ownerId: null,
         displayName: 'My Agent',
         role: 'agent',
+        kind: EnvoyMeshContactKind.bridgeAgent,
       );
       expect(contact.role, 'agent');
     });
@@ -586,6 +598,7 @@ void main() {
         peerId: 'envoy_abc',
         ownerId: 'envoy:owner:abc',
         displayName: 'Alice',
+        kind: EnvoyMeshContactKind.bondedHuman,
       );
       expect(contact.toString(), contains('Alice'));
     });

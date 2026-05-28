@@ -65,6 +65,22 @@ async def delegate_run_skill_to_inner_agent(
         f"Original user message: {uq}"
     )
     run_inner = str(uuid.uuid4())
+    # ── Task registry integration (Phase 4) ──────────────────────────
+    _task_id: Optional[str] = None
+    try:
+        from core.task_registry import create_task, update_task, TaskStatus, TaskRuntime
+        _task = create_task(
+            runtime=TaskRuntime.SKILL,
+            task_kind=f"skill:{skill_folder}",
+            owner_session_key=getattr(context, "session_id", "") or "",
+            owner_user_id=getattr(context, "user_id", "") or "",
+            metadata={"skill_folder": skill_folder, "script_arg": script_arg},
+        )
+        _task_id = _task.task_id
+        update_task(_task_id, TaskStatus.RUNNING)
+    except Exception:
+        pass
+
     try:
         pair = await answer_from_memory(
             core,
@@ -79,8 +95,26 @@ async def delegate_run_skill_to_inner_agent(
         )
     except Exception as e:
         logger.warning("skill subagent answer_from_memory failed: {}", e)
+        if _task_id:
+            try:
+                from core.task_registry import update_task, TaskStatus
+                update_task(_task_id, TaskStatus.FAILED, result_summary=str(e)[:500])
+            except Exception:
+                pass
         return f"Error: skill subagent failed: {e!s}"
 
+    result = ""
     if pair and isinstance(pair, tuple) and pair[0]:
-        return str(pair[0]).strip()
-    return "Error: skill subagent produced no output."
+        result = str(pair[0]).strip()
+    else:
+        result = "Error: skill subagent produced no output."
+
+    if _task_id:
+        try:
+            from core.task_registry import update_task, TaskStatus
+            status = TaskStatus.SUCCEEDED if result and not result.startswith("Error:") else TaskStatus.FAILED
+            update_task(_task_id, status, result_summary=result[:500])
+        except Exception:
+            pass
+
+    return result

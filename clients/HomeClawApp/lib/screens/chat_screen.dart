@@ -4314,7 +4314,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                                 fileRefs: fileRefs,
                                 onTapRef: _openUserMessageFileRef,
                               ),
-                            _ChatMessageText(
+                            ChatMessageText(
                               text: entry.key,
                               isUser: isUser,
                               plainText: _isDevBridgeFriend &&
@@ -5137,38 +5137,6 @@ class _AttachmentChip extends StatelessWidget {
       AttachmentChip(icon: icon, label: label, onRemove: onRemove);
 }
 
-/// Renders chat message text as Markdown (bold, lists, code, links, etc.) with selectable text and tappable links.
-class _ChatMessageText extends StatelessWidget {
-  final String text;
-  final bool isUser;
-  final bool plainText;
-  final ThemeData theme;
-
-  /// High-contrast text on [ColorScheme.errorContainer] bubbles (e.g. connection errors).
-  final bool isErrorMessage;
-
-  /// Called when a vmprint preview link is tapped and native preview is enabled.
-  final void Function(String url)? onVmprintPreview;
-
-  const _ChatMessageText({
-    required this.text,
-    required this.isUser,
-    required this.plainText,
-    required this.theme,
-    this.isErrorMessage = false,
-    this.onVmprintPreview,
-  });
-
-  @override
-  Widget build(BuildContext context) => ChatMessageText(
-        text: text,
-        isUser: isUser,
-        plainText: plainText,
-        theme: theme,
-        isErrorMessage: isErrorMessage,
-        onVmprintPreview: onVmprintPreview,
-      );
-}
 
 /// Chip that opens full-screen video (data URL, local path, http(s), or Core `/files/...`).
 class _VideoPlayChip extends StatelessWidget {

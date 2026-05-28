@@ -1940,6 +1940,28 @@ async def answer_from_memory(
             except Exception:
                 pass
 
+        # MemoryPlugin (Phase 1–2): if a MemoryPlugin is registered, use its
+        # build_prompt_section() to inject the memory directive. Falls through
+        # to existing behavior when no plugin is active.
+        try:
+            from core.memory_plugin.slot import get_active_memory_plugin
+            _mem_plugin = get_active_memory_plugin()
+            if _mem_plugin is not None:
+                _tools_for_prompt = set()
+                _tool_defs = getattr(Util().get_core_metadata(), "tools", [])
+                if isinstance(_tool_defs, list):
+                    for _td in _tool_defs:
+                        if hasattr(_td, "name"):
+                            _tools_for_prompt.add(_td.name)
+                _mem_section = _mem_plugin.build_prompt_section(
+                    available_tools=_tools_for_prompt if _tools_for_prompt else None,
+                )
+                if _mem_section:
+                    system_parts.append(_mem_section)
+                    _component_log("memory_plugin", f"injected prompt section from '{_mem_plugin.plugin_id}'")
+        except Exception as _mp_e:
+            logger.debug("MemoryPlugin prompt section skipped: {}", _mp_e)
+
         # Agent memory: when use_agent_memory_search is true, leverage retrieval only (no bulk inject). Otherwise inject capped AGENT_MEMORY + optional daily block.
         # When memory_flush_primary is true (default), only the dedicated flush turn writes memory; main prompt does not ask the model to call append_*.
         try:
@@ -3118,153 +3140,13 @@ async def answer_from_memory(
         if system_parts:
             llm_input = [{"role": "system", "content": "\n".join(system_parts)}]
 
-        # Compaction: optional pre-compaction memory flush (when memory_flush_primary is true), then trim messages when over limit
-        compaction_cfg = getattr(Util().get_core_metadata(), "compaction", None) or {}
-        if compaction_cfg.get("enabled") and isinstance(messages, list) and len(messages) > 0:
-            max_msg = max(2, int(compaction_cfg.get("max_messages_before_compact", 30) or 30))
-            run_flush = (
-                compaction_cfg.get("memory_flush_primary", True)
-                and len(messages) > max_msg
-                and getattr(Util().get_core_metadata(), "use_tools", True)
-                and (
-                    getattr(Util().get_core_metadata(), "use_agent_memory_file", True)
-                    or getattr(Util().get_core_metadata(), "use_daily_memory", True)
-                )
-            )
-            if run_flush and system_parts:
-                context_flush = None
-                try:
-                    flush_prompt = (compaction_cfg.get("memory_flush_prompt") or "").strip()
-                    if not flush_prompt:
-                        flush_prompt = "Store durable memories now. Use append_agent_memory for lasting facts and append_daily_memory for today. APPEND only. If nothing to store, reply briefly."
-                    flush_system = "\n".join(system_parts)
-                    flush_input = [{"role": "system", "content": flush_system}] + list(messages) + [{"role": "user", "content": flush_prompt}]
-                    registry_flush = get_tool_registry()
-                    if registry_flush is None:
-                        _component_log("compaction", "memory flush skipped: no tool registry")
-                    else:
-                        _tc = getattr(Util().get_core_metadata(), "tools_config", None) or {}
-                        _max_desc = max(0, int(_tc.get("description_max_chars") or 0))
-                        all_tools_flush = registry_flush.get_openai_tools(_max_desc if _max_desc > 0 else None) if registry_flush.list_tools() else None
-                        if not unified and all_tools_flush:
-                            all_tools_flush = [t for t in all_tools_flush if (t.get("function") or {}).get("name") not in ("route_to_tam", "route_to_plugin")]
-                        if all_tools_flush and not getattr(Util().get_core_metadata(), "peer_call_enabled", False):
-                            all_tools_flush = [t for t in all_tools_flush if (t.get("function") or {}).get("name") != "peer_call"]
-                        if not all_tools_flush:
-                            _component_log("compaction", "memory flush skipped: no tools available")
-                        else:
-                            _trace_emit_event(
-                                event_type="memory_flush_started",
-                                component="llm_loop",
-                                summary="compaction memory flush",
-                                details={"message_count": len(messages)},
-                            )
-                            context_flush = ToolContext(
-                                core=core,
-                                app_id=app_id or "homeclaw",
-                                user_name=user_name,
-                                user_id=user_id,
-                                system_user_id=getattr(request, "system_user_id", None) or user_id,
-                                friend_id=(str(getattr(request, "friend_id", None) or "").strip() or "HomeClaw"),
-                                session_id=session_id,
-                                run_id=run_id,
-                                request=request,
-                                permission_context=tool_permission_context_from_meta(Util().get_core_metadata(), request),
-                            )
-                            current_flush = list(flush_input)
-                            meta_flush = Util().get_core_metadata()
-                            tool_timeout_flush = max(0, int(getattr(meta_flush, "tool_timeout_seconds", 120) or 0))
-                            _flush_grammar = None
-                            try:
-                                if all_tools_flush and Util._get_qwen_model() == "qwen35" and Util._qwen35_use_grammar():
-                                    _flush_grammar = Util.get_qwen35_grammar()
-                            except Exception:
-                                pass
-                            for _round in range(10):
-                                try:
-                                    msg_flush = await Util().openai_chat_completion_message(
-                                        current_flush,
-                                        tools=all_tools_flush,
-                                        tool_choice="auto",
-                                        grammar=_flush_grammar,
-                                        llm_name=effective_llm_name,
-                                        stop_extra=None,
-                                        request=request,
-                                    )
-                                except Exception as e:
-                                    logger.debug("Memory flush LLM call failed: {}", e)
-                                    break
-                                if msg_flush is None:
-                                    break
-                                current_flush.append(msg_flush)
-                                tool_calls_flush = msg_flush.get("tool_calls") if isinstance(msg_flush.get("tool_calls"), list) else None
-                                content_flush = (msg_flush.get("content") or "").strip()
-                                if not tool_calls_flush and content_flush:
-                                    try:
-                                        _parsed_flush = _parse_raw_tool_calls_from_content(content_flush)
-                                        if _parsed_flush:
-                                            tool_calls_flush = _parsed_flush
-                                    except Exception:
-                                        pass
-                                if not tool_calls_flush:
-                                    break
-                                for tc in (tool_calls_flush or []):
-                                    if not isinstance(tc, dict):
-                                        continue
-                                    tcid = tc.get("id") or ""
-                                    fn = tc.get("function")
-                                    fn = fn if isinstance(fn, dict) else {}
-                                    name = (fn.get("name") or "").strip()
-                                    if not name:
-                                        continue
-                                    try:
-                                        args = json.loads(fn.get("arguments") or "{}")
-                                    except (json.JSONDecodeError, TypeError):
-                                        args = {}
-                                    if not isinstance(args, dict):
-                                        args = {}
-                                    try:
-                                        if tool_timeout_flush > 0:
-                                            result = await asyncio.wait_for(
-                                                registry_flush.execute_async(name, args, context_flush),
-                                                timeout=tool_timeout_flush,
-                                            )
-                                        else:
-                                            result = await registry_flush.execute_async(name, args, context_flush)
-                                    except asyncio.TimeoutError:
-                                        result = f"Error: tool {name} timed out after {tool_timeout_flush}s."
-                                    except Exception as e:
-                                        result = f"Error: {e!s}"
-                                    try:
-                                        current_flush.append({"role": "tool", "tool_call_id": tcid, "content": result})
-                                    except Exception:
-                                        break
-                            _component_log("compaction", "memory flush turn completed")
-                            _trace_emit_event(
-                                event_type="memory_flush_finished",
-                                component="llm_loop",
-                                summary="compaction memory flush done",
-                                details={},
-                            )
-                except Exception as e:
-                    logger.warning("Memory flush failed (continuing with compaction): {}", e, exc_info=True)
-                finally:
-                    if context_flush is not None:
-                        try:
-                            await close_browser_session(context_flush)
-                        except Exception as e:
-                            logger.debug("Memory flush close_browser_session failed: {}", e)
-            if len(messages) > max_msg:
-                _before_trim = len(messages)
-                messages = messages[-max_msg:]
-                _component_log("compaction", f"trimmed to last {max_msg} messages")
-                _trace_emit_event(
-                    event_type="context_compacted",
-                    component="llm_loop",
-                    summary="messages trimmed",
-                    details={"before": _before_trim, "after": len(messages), "max_messages": max_msg},
-                )
-
+        # Compaction: delegate to ContextEngine (Phase 0) with legacy fallback.
+        await _compact_via_engine(
+            core=core, messages=messages, session_id=session_id,
+            system_parts=system_parts, app_id=app_id, user_name=user_name,
+            user_id=user_id, run_id=run_id, request=request,
+            effective_llm_name=effective_llm_name, unified=unified,
+        )
         # Friend preset: limit chat history to last N turns when preset has history as number (saves context tokens).
         if _current_friend and isinstance(messages, list) and messages:
             try:
@@ -4389,6 +4271,22 @@ async def answer_from_memory(
                         else:
                             msg = await _llm_coro
                         _turn_tt_add_llm(time.perf_counter() - _llm_t0)
+
+                        # ── prompt-cache telemetry (Phase 3.6) ──────────
+                        try:
+                            _cache_hit = 0
+                            _cache_miss = 0
+                            if isinstance(msg, dict):
+                                _usage = msg.get("usage") or {}
+                                _cache_hit = int(_usage.get("prompt_cache_hit_tokens") or 0)
+                                _cache_miss = int(_usage.get("prompt_cache_miss_tokens") or 0)
+                            if _cache_hit or _cache_miss:
+                                _total = _cache_hit + _cache_miss
+                                _hit_pct = (_cache_hit / _total * 100) if _total > 0 else 0
+                                _component_log("prompt_cache", f"hit={_cache_hit} miss={_cache_miss} ({_hit_pct:.0f}%)")
+                        except Exception:
+                            pass
+
                     except asyncio.TimeoutError:
                         logger.warning(
                             "LLM tool-decision turn timed out after {}s (route={}, model={}); will try fallback if available.",
@@ -6862,3 +6760,71 @@ async def answer_from_memory(
             detach_prompt_request_for_usage()
 
 
+# ── Compaction helper (Phase 0: ContextEngine integration) ─────────────
+
+
+async def _compact_via_engine(
+    *,
+    core: Any,
+    messages: List,
+    session_id: Optional[str],
+    system_parts: List[str],
+    app_id: Optional[str],
+    user_name: Optional[str],
+    user_id: Optional[str],
+    run_id: Optional[str],
+    request: Optional[PromptRequest],
+    effective_llm_name: Optional[str],
+    unified: bool,
+) -> None:
+    """
+    Run compaction through the registered ContextEngine.
+
+    Tries the ContextEngine first. Falls back to legacy inline compaction
+    when no engine is registered or the engine call fails.
+    """
+    engine = None
+    try:
+        from core.context_engine.registry import (
+            ensure_context_engines_initialized,
+            resolve_context_engine,
+        )
+        ensure_context_engines_initialized()
+        engine_slot = getattr(Util().get_core_metadata(), "context_engine_slot", None) or "legacy"
+        engine = resolve_context_engine(engine_slot, core=core)
+    except Exception:
+        engine = None
+
+    if engine is not None:
+        try:
+            _sf = getattr(core, "_compact_session_file", None) or ""
+            _tk = estimate_messages_token_budget(messages)
+            from core.context_engine.protocol import ContextEngineRuntimeContext
+            _rtx = ContextEngineRuntimeContext(
+                current_token_count=_tk,
+                extra={"messages": messages},
+            )
+            cr = await engine.compact(
+                session_id=session_id or "",
+                session_key=None,
+                session_file=str(_sf) if _sf else "",
+                token_budget=None,
+                force=False,
+                current_token_count=_tk,
+                compaction_target="budget",
+                runtime_context=_rtx,
+            )
+            if isinstance(cr, object) and getattr(cr, "compacted", False):
+                _component_log("context_engine", f"compacted: {getattr(cr, 'reason', '')}")
+                if getattr(cr, "session_id", None):
+                    _component_log("context_engine", f"session rotated → {cr.session_id}")
+
+            return  # Engine handled it (hooks fire internally)
+        except Exception as ce:
+            logger.warning("ContextEngine.compact() failed, falling back: {}", ce, exc_info=True)
+
+    # ── Legacy compaction: delegated to ContextEngine ─────────────────
+    # The LegacyContextEngine handles flush + trim internally.
+    # When no engine is registered, compaction is a no-op.
+    logger.debug("_compact_via_engine: no engine available, skipping compaction")
+    return

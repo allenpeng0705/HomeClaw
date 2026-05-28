@@ -187,3 +187,28 @@ def get_memory_reset_handler(core):
             logger.exception(e)
             return JSONResponse(status_code=500, content={"detail": str(e)})
     return memory_reset
+
+
+def get_memory_health_handler(core):
+    """Return handler for GET /memory/health — MemoryPlugin health + doctor check."""
+    from fastapi.responses import JSONResponse
+
+    async def memory_health():
+        try:
+            from core.memory_plugin.slot import get_active_memory_plugin
+            plugin = get_active_memory_plugin()
+            if plugin is None:
+                return JSONResponse(content={"ok": False, "message": "No MemoryPlugin active."})
+            health = await plugin.health()
+            doctor = await plugin.doctor()
+            return JSONResponse(content={
+                "ok": health.ok,
+                "backend": health.backend,
+                "index_size": health.index_size,
+                "vector_store_ok": health.vector_store_ok,
+                "error_count": health.error_count,
+                "doctor": doctor,
+            })
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+    return memory_health
