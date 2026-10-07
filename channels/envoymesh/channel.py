@@ -73,16 +73,42 @@ def _shared_http() -> httpx.AsyncClient:
 
 # ── config ──────────────────────────────────────────────────────────────────
 
+# Module-level config cache. Set by _reload_config(); may be overridden by
+# _core_overrides (set by Core before calling main()/run_channel()).
+_cfg: dict = {}
+BRIDGE_URL: str = ""
+BRIDGE_SECRET: str = ""
+CHANNEL_NAME: str = ""
+HC_USER_ID: str = ""
+
+# Config overrides from Core (populated before main()/run_channel() is called).
+_core_overrides: Optional[dict] = None
+
+
 def _load_config() -> dict:
     cfg_path = Path(__file__).resolve().parent / "config.yml"
     with open(cfg_path, "r") as fh:
         return yaml.safe_load(fh) or {}
 
-_cfg = _load_config()
-BRIDGE_URL = os.getenv("ENVOYMESH_BRIDGE_URL", _cfg.get("bridge_url", "http://127.0.0.1:3031/bridge/send"))
-BRIDGE_SECRET = os.getenv("ENVOYMESH_BRIDGE_SECRET", _cfg.get("bridge_secret", ""))
-CHANNEL_NAME = os.getenv("ENVOYMESH_CHANNEL_NAME", _cfg.get("name", "envoymesh"))
-HC_USER_ID = os.getenv("ENVOYMESH_USER_ID", _cfg.get("user_id", "AllenPeng"))
+
+def _reload_config() -> None:
+    """(Re)load config from disk and environment. Called once at module load
+    and again by run_channel() if Core overrides are passed."""
+    global _cfg, BRIDGE_URL, BRIDGE_SECRET, CHANNEL_NAME, HC_USER_ID
+    _cfg = _load_config()
+    # Env vars take precedence over config.yml, then Core overrides take final precedence
+    BRIDGE_URL = os.getenv("ENVOYMESH_BRIDGE_URL", _cfg.get("bridge_url", "http://127.0.0.1:3031/bridge/send"))
+    BRIDGE_SECRET = os.getenv("ENVOYMESH_BRIDGE_SECRET", _cfg.get("bridge_secret", ""))
+    CHANNEL_NAME = os.getenv("ENVOYMESH_CHANNEL_NAME", _cfg.get("name", "envoymesh"))
+    HC_USER_ID = os.getenv("ENVOYMESH_USER_ID", _cfg.get("user_id", "AllenPeng"))
+    # Apply Core overrides (highest precedence after env vars)
+    if _core_overrides:
+        BRIDGE_URL = _core_overrides.get("bridge_url", BRIDGE_URL)
+        BRIDGE_SECRET = _core_overrides.get("bridge_secret", BRIDGE_SECRET)
+        CHANNEL_NAME = _core_overrides.get("name", CHANNEL_NAME)
+        HC_USER_ID = _core_overrides.get("user_id", HC_USER_ID)
+
+_reload_config()
 
 
 def core_url() -> str:
@@ -239,14 +265,31 @@ async def _reply_to_bridge(to: str, text: str) -> bool:
         return False
 
 
-# ── entry ───────────────────────────────────────────────────────────────────
+# ── entry points ────────────────────────────────────────────────────────────
 
-def main():
+def run_channel(config_overrides: Optional[dict] = None) -> None:
+    """Start the EnvoyMesh channel with optional config overrides from Core.
+
+    Args:
+        config_overrides: dict with optional keys bridge_url, bridge_secret,
+                          name, user_id, port, host. Set by Core when auto-starting.
+    """
+    global _core_overrides
+    if config_overrides:
+        _core_overrides = config_overrides
+        _reload_config()
     import uvicorn
     port = int(os.getenv("ENVOYMESH_PORT", str(_cfg.get("port", 8010))))
     host = os.getenv("ENVOYMESH_HOST", _cfg.get("host", "0.0.0.0"))
-    logger.info(f"[envoymesh] starting on {host}:{port}, bridge → {BRIDGE_URL}")
+    if config_overrides:
+        port = int(config_overrides.get("port", port))
+        host = config_overrides.get("host", host)
+    logger.info(f"[envoymesh] starting on {host}:{port}, bridge → {BRIDGE_URL}, user → {HC_USER_ID}")
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+def main():
+    run_channel()
 
 
 if __name__ == "__main__":

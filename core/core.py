@@ -196,6 +196,7 @@ class Core(CoreInterface):
     def __init__(self):
         if not hasattr(self, 'initialized'):
             self.hasEmailChannel = False
+            self.hasEnvoyMeshChannel = False
             self.initialized = True
             self.latestPromptRequest: PromptRequest = None
             Util().setup_logging("core", Util().get_core_metadata().mode)
@@ -1903,6 +1904,60 @@ class Core(CoreInterface):
             except Exception as e:
                 logger.exception(e)
 
+    def start_envoymesh_channel(self):
+        """Start EnvoyMesh channel as a built-in trusted channel.
+
+        Reads envoymesh config from core.yml. When enabled:
+        - Resolves the user_id from config or user.yml envoymesh: entries
+        - Starts the channel's FastAPI server in a daemon thread
+        - The channel forwards all P2P messages to Core /inbound for processing
+        """
+        try:
+            # Read envoymesh config from core.yml
+            core_yml_path = os.path.join(Util().config_path(), "core.yml")
+            envoymesh_cfg = {}
+            if os.path.isfile(core_yml_path):
+                with open(core_yml_path, "r", encoding="utf-8") as f:
+                    core_raw = yaml.safe_load(f) or {}
+                envoymesh_cfg = core_raw.get("envoymesh") or {}
+            if not envoymesh_cfg.get("enabled", False):
+                self.hasEnvoyMeshChannel = False
+                return
+            # Resolve user_id: use config value, or find first user with envoymesh: im entry
+            user_id = (envoymesh_cfg.get("user_id") or "").strip()
+            if not user_id:
+                users = Util().get_users() or []
+                for u in users:
+                    im_list = getattr(u, "im", None) or []
+                    for entry in im_list:
+                        if str(entry).startswith("envoymesh:"):
+                            user_id = getattr(u, "id", None) or getattr(u, "name", None) or ""
+                            if user_id:
+                                break
+                    if user_id:
+                        break
+            if not user_id:
+                logger.warning("[envoymesh] channel enabled but no user_id configured and no envoymesh: entry found in user.yml. Channel not started.")
+                self.hasEnvoyMeshChannel = False
+                return
+            logger.info(f"[envoymesh] auto-starting as built-in channel (user={user_id}, port={envoymesh_cfg.get('port', 8010)})")
+            # Build config overrides for the channel
+            overrides = {
+                "port": envoymesh_cfg.get("port", 8010),
+                "host": envoymesh_cfg.get("host", "0.0.0.0"),
+                "bridge_url": envoymesh_cfg.get("bridge_url", "http://127.0.0.1:3031/bridge/send"),
+                "bridge_secret": envoymesh_cfg.get("bridge_secret", ""),
+                "user_id": user_id,
+            }
+            # Import and start the channel
+            from channels.envoymesh.channel import run_channel
+            thread = threading.Thread(target=run_channel, args=(overrides,), daemon=True, name="envoymesh-channel")
+            thread.start()
+            self.hasEnvoyMeshChannel = True
+        except Exception as e:
+            logger.exception(f"[envoymesh] failed to start: {e}")
+            self.hasEnvoyMeshChannel = False
+
     async def _start_pinggy_and_open_browser(self):
         """If pinggy.token is set in core.yml: start tunnel in a daemon thread, set _pinggy_state when ready, optionally open browser to /pinggy."""
         global _pinggy_state
@@ -2034,6 +2089,7 @@ class Core(CoreInterface):
             server_task = asyncio.create_task(self.server.serve())
             await asyncio.sleep(0.5)
             self.start_email_channel()
+            self.start_envoymesh_channel()
             # Mark HTTP ready as soon as the server is accepting connections. Remaining work below
             # (vector syncs, plugin load) can take minutes; without this, curl /ready blocks on 503 and
             # operators assume Core is dead. Semantic/plugin sync may still be running after 200.

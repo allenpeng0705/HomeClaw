@@ -135,6 +135,16 @@ llm_config_file: llm.yml
 
 # database, vectorDB, graphDB, cognee: in config/memory_kb.yml (see memory_kb_config_file above).
 endpoints: []
+# EnvoyMesh channel: built-in P2P bridge channel. Set enabled: true to auto-start when Core starts.
+# The channel receives P2P messages from the EnvoyMesh bridge via POST /message, forwards to Core,
+# and sends Core's reply back through the bridge.
+envoymesh:
+  enabled: true           # true = auto-start EnvoyMesh channel when Core starts
+  host: "0.0.0.0"         # channel listen host
+  port: 8010              # channel listen port (EnvoyMesh bridge POSTs here)
+  bridge_url: "http://127.0.0.1:3031/bridge/send"  # EnvoyMesh bridge callback URL
+  bridge_secret: ""       # shared secret with EnvoyMesh bridge (Authorization: Bearer <secret>)
+  user_id: "AllenPeng"             # HomeClaw user ID (must match an id in config/user.yml). When empty, uses the first user with an envoymesh: im entry.
 # Companion feature: external plugin. Core only routes (enabled, plugin_id, session_id_value, keyword).
 # All companion settings (name, character, language, etc.) live in the plugin config; no defaults in Core code.
 # keyword is required when enabled: companion routing is disabled until keyword (or name) is set here. Used for message-prefix routing (e.g. "Veda, hi").

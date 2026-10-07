@@ -118,3 +118,9 @@ tests/.DS_Store
 /clients/clawcode/__pycache__
 /clients/homeclaw_mcp/__pycache__
 .DS_Store
+/core/approvals/__pycache__
+/core/context_engine/__pycache__
+/core/hooks/__pycache__
+/core/memory_plugin/__pycache__
+docs_design/HomeClawEnvoyMeshRefactorDirection.md
+/channels/envoymesh/__pycache__
